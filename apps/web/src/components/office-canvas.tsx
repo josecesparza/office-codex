@@ -194,7 +194,8 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     canvas.width = width;
     canvas.height = height;
     canvas.style.width = `${width * SCALE}px`;
-    canvas.style.height = `${height * SCALE}px`;
+    canvas.style.height = "auto";
+    canvas.style.maxWidth = "100%";
 
     let frameId = 0;
     let lastFrame = 0;

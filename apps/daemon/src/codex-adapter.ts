@@ -665,6 +665,8 @@ export async function startPassiveCodexAdapter(options: {
     }
   }
 
+  markHistoricalSeedsOffline(store, Date.now(), config.idleMs);
+
   metrics.bootstrapDurationMs = Date.now() - bootstrapStartedAt;
 
   const watcher = chokidar.watch(watchedRoots, {

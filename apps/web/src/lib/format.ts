@@ -35,3 +35,15 @@ export function formatRelative(iso: string): string {
   const deltaDays = Math.floor(deltaHours / 24);
   return `${deltaDays}d ago`;
 }
+
+export function shortenIdentifier(value: string, lead = 8, tail = 4): string {
+  if (!value) {
+    return "unknown";
+  }
+
+  if (value.length <= lead + tail + 1) {
+    return value;
+  }
+
+  return `${value.slice(0, lead)}...${value.slice(-tail)}`;
+}

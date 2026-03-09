@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 import { defaultOfficeLayout, officePalette } from "@office-codex/assets";
 import { MiniAgentAvatar } from "./components/mini-agent-avatar";
 import { OfficeCanvas } from "./components/office-canvas";
-import { basename, formatRelative } from "./lib/format";
+import { basename, formatRelative, shortenIdentifier } from "./lib/format";
 import { useOfficeStore } from "./lib/office-store";
 import {
   type SessionGeometry,
@@ -19,7 +19,7 @@ import { useOfficeData } from "./lib/use-office-data";
 const ROSTER_LIVE_LIMIT = 20;
 const OFFLINE_PAGE_SIZE = 20;
 const CONNECTOR_MIN_WIDTH = 1080;
-const TOOLTIP_WIDTH = 220;
+const TOOLTIP_WIDTH = 276;
 
 const stateLabels: Record<string, string> = {
   inactive: "Idle",
@@ -70,6 +70,35 @@ function getTooltipStyle(
       transform: showBelow ? "translate(-50%, 0)" : "translate(-50%, -100%)",
       width: `${TOOLTIP_WIDTH}px`,
     },
+  };
+}
+
+function looksLikeMachineTitle(title: string, sessionId: string): boolean {
+  if (!title || title === sessionId) {
+    return true;
+  }
+
+  return /^[0-9a-f]{8,}-[0-9a-f-]{8,}$/i.test(title);
+}
+
+function getTooltipIdentity(session: {
+  cwd: string;
+  sessionId: string;
+  title: string;
+}) {
+  const repoName = basename(session.cwd);
+  const shortId = shortenIdentifier(session.sessionId, 8, 4);
+
+  if (looksLikeMachineTitle(session.title, session.sessionId)) {
+    return {
+      primary: repoName,
+      secondary: `Session ${shortId}`,
+    };
+  }
+
+  return {
+    primary: session.title,
+    secondary: `${repoName} · ${shortId}`,
   };
 }
 
@@ -202,6 +231,7 @@ export function App() {
   const tooltipGeometry = hoveredSessionId ? sessionGeometries[hoveredSessionId] : null;
   const tooltipTarget =
     hoveredOfficeSession?.session.state === "offline" ? null : hoveredOfficeSession;
+  const tooltipIdentity = tooltipTarget ? getTooltipIdentity(tooltipTarget.session) : null;
 
   useLayoutEffect(() => {
     const workspace = workspaceRef.current;
@@ -368,7 +398,8 @@ export function App() {
                   <span className="office-tooltip-badge">{tooltipTarget.deskBadge}</span>
                   <span>{stateLabels[tooltipTarget.session.state]}</span>
                 </div>
-                <strong>{tooltipTarget.session.title || tooltipTarget.session.sessionId}</strong>
+                <strong>{tooltipIdentity?.primary}</strong>
+                <p className="office-tooltip-subtitle">{tooltipIdentity?.secondary}</p>
                 <dl>
                   <div>
                     <dt>Branch</dt>

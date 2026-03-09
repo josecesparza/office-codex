@@ -287,7 +287,17 @@ body {
 
 .office-tooltip strong {
   font-size: 16px;
-  line-height: 1.1;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.office-tooltip-subtitle {
+  margin: -4px 0 0;
+  color: #6f6258;
+  font-family: "Menlo", "Monaco", monospace;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
 }
 
 .office-tooltip dl {

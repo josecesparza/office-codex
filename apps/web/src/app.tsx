@@ -146,16 +146,17 @@ function getRosterIdentity(
 }
 
 export function App() {
-  useOfficeData();
+  const { historyLoaded, historyLoading, loadMoreHistory } = useOfficeData();
 
   const connection = useOfficeStore((state) => state.connection);
   const account = useOfficeStore((state) => state.account);
   const activityBySession = useOfficeStore((state) => state.activityBySession);
+  const historySessions = useOfficeStore((state) => state.historySessions);
   const layout = useOfficeStore((state) => state.layout);
-  const sessions = useOfficeStore((state) => state.sessions);
+  const liveSessions = useOfficeStore((state) => state.liveSessions);
   const lastMutationAt = useOfficeStore((state) => state.lastMutationAt);
+  const sessionMeta = useOfficeStore((state) => state.sessionMeta);
   const [showOfflineHistory, setShowOfflineHistory] = useState(false);
-  const [offlineLimit, setOfflineLimit] = useState(OFFLINE_PAGE_SIZE);
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [deskAssignments, setDeskAssignments] = useState<Record<string, string>>({});
@@ -169,13 +170,10 @@ export function App() {
   const cardRefs = useRef(new Map<string, HTMLElement>());
 
   const effectiveLayout = layout ?? defaultOfficeLayout;
-  const liveSessions = useMemo(
-    () => sessions.filter((session) => session.state !== "offline"),
-    [sessions],
-  );
-  const offlineSessions = useMemo(
-    () => sessions.filter((session) => session.state === "offline"),
-    [sessions],
+  const liveCount = sessionMeta?.liveCount ?? liveSessions.length;
+  const offlineCount = Math.max(
+    sessionMeta?.offlineCount ?? historySessions.length,
+    historySessions.length,
   );
 
   useEffect(() => {
@@ -251,6 +249,26 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (
+      showOfflineHistory &&
+      !historyLoaded &&
+      !historyLoading &&
+      (offlineCount > 0 || historySessions.length > 0)
+    ) {
+      void loadMoreHistory({
+        reset: true,
+      });
+    }
+  }, [
+    historyLoaded,
+    historyLoading,
+    historySessions.length,
+    loadMoreHistory,
+    offlineCount,
+    showOfflineHistory,
+  ]);
+
   const liveOfficeSessions = useMemo(
     () => buildLiveOfficeSessions(liveSessions, effectiveLayout, resolvedDeskAssignments, now),
     [effectiveLayout, liveSessions, now, resolvedDeskAssignments],
@@ -259,13 +277,10 @@ export function App() {
     () => liveOfficeSessions.slice(0, ROSTER_LIVE_LIMIT),
     [liveOfficeSessions],
   );
-  const visibleOfflineSessions = useMemo(
-    () => offlineSessions.slice(0, offlineLimit),
-    [offlineLimit, offlineSessions],
-  );
-  const hiddenOfflineCount = Math.max(offlineSessions.length - visibleOfflineSessions.length, 0);
+  const visibleOfflineSessions = useMemo(() => historySessions, [historySessions]);
+  const hiddenOfflineCount = Math.max(offlineCount - visibleOfflineSessions.length, 0);
   const hiddenLiveCount = Math.max(liveOfficeSessions.length - visibleLiveSessions.length, 0);
-  const metrics = useMemo(() => getOfficeMetrics(sessions, now), [now, sessions]);
+  const metrics = useMemo(() => getOfficeMetrics(liveSessions, now), [liveSessions, now]);
   const attentionItems = useMemo(
     () => getAttentionItems(liveOfficeSessions, now),
     [liveOfficeSessions, now],
@@ -636,23 +651,23 @@ export function App() {
               <p>Live sessions follow desk order. Offline history stays separate.</p>
             </div>
             <div className="panel-actions">
-              {offlineSessions.length > 0 ? (
+              {offlineCount > 0 ? (
                 <button
                   className="panel-button"
                   onClick={() => setShowOfflineHistory((current) => !current)}
                   type="button"
                 >
                   {showOfflineHistory
-                    ? `Hide offline history (${offlineSessions.length})`
-                    : `Show offline history (${offlineSessions.length})`}
+                    ? `Hide offline history (${offlineCount})`
+                    : `Show offline history (${offlineCount})`}
                 </button>
               ) : null}
             </div>
           </div>
 
           <div className="panel-summary">
-            <span>{liveOfficeSessions.length} live</span>
-            <span>{offlineSessions.length} offline</span>
+            <span>{liveCount} live</span>
+            <span>{offlineCount} offline</span>
             <span>showing {totalVisibleSessions}</span>
           </div>
 
@@ -752,79 +767,89 @@ export function App() {
                 </p>
               </div>
 
-              <div className="session-list">
-                {visibleOfflineSessions.map((session) => {
-                  const accentColor = getSessionAccent(session.sessionId);
-                  const sessionIdentity = getRosterIdentity(session, { offline: true });
+              {historyLoading && visibleOfflineSessions.length === 0 ? (
+                <div className="empty-card">
+                  <strong>Loading offline history.</strong>
+                  <p>Fetching the most recent offline sessions from the daemon.</p>
+                </div>
+              ) : (
+                <div className="session-list">
+                  {visibleOfflineSessions.map((session) => {
+                    const accentColor = getSessionAccent(session.sessionId);
+                    const sessionIdentity = getRosterIdentity(session, { offline: true });
 
-                  return (
-                    <article
-                      className="session-card session-card-offline"
-                      key={session.sessionId}
-                      onMouseEnter={() => setHoveredSessionId(session.sessionId)}
-                      onMouseLeave={() =>
-                        setHoveredSessionId((current) =>
-                          current === session.sessionId ? null : current,
-                        )
-                      }
-                      style={
-                        {
-                          "--session-accent": accentColor,
-                          "--session-accent-soft": getSessionAccentSoft(session.sessionId),
-                        } as CSSProperties
-                      }
-                    >
-                      <div className="session-card-head">
-                        <div className="session-card-identity">
-                          <div className="session-card-badge-stack">
-                            <span className="desk-badge desk-badge-offline">OFF</span>
-                            <MiniAgentAvatar
-                              color={accentColor}
-                              label="Offline agent"
-                              variant={0}
-                            />
+                    return (
+                      <article
+                        className="session-card session-card-offline"
+                        key={session.sessionId}
+                        onMouseEnter={() => setHoveredSessionId(session.sessionId)}
+                        onMouseLeave={() =>
+                          setHoveredSessionId((current) =>
+                            current === session.sessionId ? null : current,
+                          )
+                        }
+                        style={
+                          {
+                            "--session-accent": accentColor,
+                            "--session-accent-soft": getSessionAccentSoft(session.sessionId),
+                          } as CSSProperties
+                        }
+                      >
+                        <div className="session-card-head">
+                          <div className="session-card-identity">
+                            <div className="session-card-badge-stack">
+                              <span className="desk-badge desk-badge-offline">OFF</span>
+                              <MiniAgentAvatar
+                                color={accentColor}
+                                label="Offline agent"
+                                variant={0}
+                              />
+                            </div>
+                            <div>
+                              <h3>{sessionIdentity.primary}</h3>
+                              <p>{sessionIdentity.secondary}</p>
+                            </div>
+                          </div>
+                          <span className={`badge badge-${session.state}`}>
+                            {stateLabels[session.state]}
+                          </span>
+                        </div>
+                        <dl>
+                          <div>
+                            <dt>Branch</dt>
+                            <dd>{session.gitBranch ?? "unknown"}</dd>
                           </div>
                           <div>
-                            <h3>{sessionIdentity.primary}</h3>
-                            <p>{sessionIdentity.secondary}</p>
+                            <dt>Tool</dt>
+                            <dd>{session.currentTool ?? "none"}</dd>
                           </div>
-                        </div>
-                        <span className={`badge badge-${session.state}`}>
-                          {stateLabels[session.state]}
-                        </span>
-                      </div>
-                      <dl>
-                        <div>
-                          <dt>Branch</dt>
-                          <dd>{session.gitBranch ?? "unknown"}</dd>
-                        </div>
-                        <div>
-                          <dt>Tool</dt>
-                          <dd>{session.currentTool ?? "none"}</dd>
-                        </div>
-                        <div>
-                          <dt>Updated</dt>
-                          <dd>{formatRelative(session.updatedAt)}</dd>
-                        </div>
-                        <div>
-                          <dt>Subtasks</dt>
-                          <dd>{session.activeSubtasks}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  );
-                })}
-              </div>
+                          <div>
+                            <dt>Updated</dt>
+                            <dd>{formatRelative(session.updatedAt)}</dd>
+                          </div>
+                          <div>
+                            <dt>Subtasks</dt>
+                            <dd>{session.activeSubtasks}</dd>
+                          </div>
+                        </dl>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
             </>
           ) : null}
 
           {showOfflineHistory && hiddenOfflineCount > 0 ? (
             <button
               className="panel-button panel-button-secondary"
-              onClick={() => setOfflineLimit((current) => current + OFFLINE_PAGE_SIZE)}
+              disabled={historyLoading}
+              onClick={() => void loadMoreHistory()}
               type="button"
             >
-              Show 20 more offline sessions ({hiddenOfflineCount} remaining)
+              {historyLoading
+                ? "Loading offline history..."
+                : `Show ${OFFLINE_PAGE_SIZE} more offline sessions (${hiddenOfflineCount} remaining)`}
             </button>
           ) : null}
         </aside>

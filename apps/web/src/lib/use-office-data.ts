@@ -1,15 +1,74 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { AccountUsageStatus, AgentSession, OfficeLayout } from "@office-codex/core";
 
-import { type EventEnvelope, daemonEventTypes, useOfficeStore } from "./office-store";
+import {
+  type EventEnvelope,
+  type SessionCollectionMeta,
+  daemonEventTypes,
+  useOfficeStore,
+} from "./office-store";
 
-export function useOfficeData(): void {
+interface SessionCollectionPayload {
+  meta: SessionCollectionMeta;
+  sessions: AgentSession[];
+}
+
+interface LoadHistoryOptions {
+  reset?: boolean;
+}
+
+interface UseOfficeDataResult {
+  historyLoaded: boolean;
+  historyLoading: boolean;
+  loadMoreHistory(options?: LoadHistoryOptions): Promise<void>;
+}
+
+export function useOfficeData(): UseOfficeDataResult {
   const setAccount = useOfficeStore((state) => state.setAccount);
   const setConnection = useOfficeStore((state) => state.setConnection);
+  const setHistoryPage = useOfficeStore((state) => state.setHistoryPage);
   const setLayout = useOfficeStore((state) => state.setLayout);
-  const setSnapshot = useOfficeStore((state) => state.setSnapshot);
+  const setLiveSnapshot = useOfficeStore((state) => state.setLiveSnapshot);
   const applyEnvelope = useOfficeStore((state) => state.applyEnvelope);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const loadMoreHistory = useCallback(
+    async (options: LoadHistoryOptions = {}): Promise<void> => {
+      const { historySessions } = useOfficeStore.getState();
+      const query = new URLSearchParams({
+        limit: "20",
+        scope: "history",
+      });
+
+      if (!options.reset) {
+        const before = historySessions.at(-1)?.updatedAt;
+
+        if (before) {
+          query.set("before", before);
+        }
+      }
+
+      setHistoryLoading(true);
+
+      try {
+        const response = await fetch(`/api/sessions?${query.toString()}`);
+
+        if (!response.ok) {
+          throw new Error("Unable to load offline history");
+        }
+
+        const payload = (await response.json()) as SessionCollectionPayload;
+
+        setHistoryPage(payload.sessions, payload.meta, options.reset ? "replace" : "append");
+        setHistoryLoaded(true);
+      } finally {
+        setHistoryLoading(false);
+      }
+    },
+    [setHistoryPage],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -17,9 +76,10 @@ export function useOfficeData(): void {
 
     async function bootstrap(): Promise<void> {
       try {
-        const [layoutResponse, sessionsResponse] = await Promise.all([
+        const [layoutResponse, sessionsResponse, accountResponse] = await Promise.all([
           fetch("/api/layout"),
-          fetch("/api/sessions"),
+          fetch("/api/sessions?scope=live"),
+          fetch("/api/account"),
         ]);
 
         if (!layoutResponse.ok || !sessionsResponse.ok) {
@@ -27,17 +87,17 @@ export function useOfficeData(): void {
         }
 
         const layoutPayload = (await layoutResponse.json()) as { layout: OfficeLayout };
-        const sessionsPayload = (await sessionsResponse.json()) as { sessions: AgentSession[] };
-        const accountPayload = (await fetch("/api/account").then((response) =>
-          response.ok ? (response.json() as Promise<{ account: AccountUsageStatus }>) : null,
-        )) as { account: AccountUsageStatus } | null;
+        const sessionsPayload = (await sessionsResponse.json()) as SessionCollectionPayload;
+        const accountPayload = accountResponse.ok
+          ? ((await accountResponse.json()) as { account: AccountUsageStatus })
+          : null;
 
         if (!disposed) {
           if (accountPayload) {
             setAccount(accountPayload.account);
           }
           setLayout(layoutPayload.layout);
-          setSnapshot(sessionsPayload.sessions);
+          setLiveSnapshot(sessionsPayload.sessions, sessionsPayload.meta);
           setConnection("ready");
         }
       } catch {
@@ -64,10 +124,13 @@ export function useOfficeData(): void {
     };
 
     source.addEventListener("snapshot", (event) => {
-      const payload = JSON.parse(event.data) as { sessions: AgentSession[] };
+      const payload = JSON.parse(event.data) as SessionCollectionPayload;
 
       if (!disposed) {
-        setSnapshot(payload.sessions);
+        setLiveSnapshot(
+          payload.sessions.filter((session) => session.state !== "offline"),
+          payload.meta,
+        );
       }
     });
 
@@ -85,5 +148,11 @@ export function useOfficeData(): void {
       disposed = true;
       source?.close();
     };
-  }, [applyEnvelope, setAccount, setConnection, setLayout, setSnapshot]);
+  }, [applyEnvelope, setAccount, setConnection, setLayout, setLiveSnapshot]);
+
+  return {
+    historyLoaded,
+    historyLoading,
+    loadMoreHistory,
+  };
 }

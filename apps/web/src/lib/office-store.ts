@@ -26,17 +26,35 @@ export interface SessionActivityItem {
   label: string;
 }
 
+export interface SessionCollectionMeta {
+  hasMoreHistory: boolean;
+  historyCap: number;
+  liveCount: number;
+  nextBefore: string | null;
+  offlineCount: number;
+  trackedCount: number;
+}
+
 interface OfficeState {
   account: AccountUsageStatus | null;
   activityBySession: Record<string, SessionActivityItem[]>;
   connection: ConnectionState;
+  historySessions: AgentSession[];
   layout: OfficeLayout | null;
+  liveSessions: AgentSession[];
+  sessionMeta: SessionCollectionMeta | null;
   sessions: AgentSession[];
   lastMutationAt: number;
   setAccount(account: AccountUsageStatus): void;
   setConnection(connection: ConnectionState): void;
+  setHistoryPage(
+    sessions: AgentSession[],
+    meta: SessionCollectionMeta,
+    mode: "append" | "replace",
+  ): void;
   setLayout(layout: OfficeLayout): void;
-  setSnapshot(sessions: AgentSession[]): void;
+  setLiveSnapshot(sessions: AgentSession[], meta: SessionCollectionMeta): void;
+  setSnapshot(sessions: AgentSession[], meta?: SessionCollectionMeta): void;
   applyEnvelope(envelope: EventEnvelope): void;
 }
 
@@ -48,6 +66,91 @@ function upsertSession(list: AgentSession[], session: AgentSession): AgentSessio
   const next = list.filter((candidate) => candidate.sessionId !== session.sessionId);
   next.push(session);
   return sortSessions(next);
+}
+
+function mergeSessions(base: AgentSession[], incoming: AgentSession[]): AgentSession[] {
+  const byId = new Map<string, AgentSession>();
+
+  for (const session of base) {
+    byId.set(session.sessionId, session);
+  }
+
+  for (const session of incoming) {
+    byId.set(session.sessionId, session);
+  }
+
+  return sortSessions([...byId.values()]);
+}
+
+function buildCombinedSessions(
+  liveSessions: AgentSession[],
+  historySessions: AgentSession[],
+): AgentSession[] {
+  return mergeSessions(liveSessions, historySessions);
+}
+
+function deriveMeta(
+  liveSessions: AgentSession[],
+  historySessions: AgentSession[],
+): SessionCollectionMeta {
+  return {
+    hasMoreHistory: false,
+    historyCap: Math.max(historySessions.length, 200),
+    liveCount: liveSessions.length,
+    nextBefore: historySessions.at(-1)?.updatedAt ?? null,
+    offlineCount: historySessions.length,
+    trackedCount: liveSessions.length + historySessions.length,
+  };
+}
+
+function mergeQueryMeta(
+  current: SessionCollectionMeta | null,
+  incoming: SessionCollectionMeta,
+): SessionCollectionMeta {
+  if (!current) {
+    return incoming;
+  }
+
+  return {
+    ...current,
+    ...incoming,
+  };
+}
+
+function patchMetaForSession(
+  current: SessionCollectionMeta | null,
+  previousSession: AgentSession | undefined,
+  nextSession: AgentSession,
+  loadedHistoryCount: number,
+): SessionCollectionMeta {
+  const nextMeta = current
+    ? { ...current }
+    : deriveMeta(
+        previousSession?.state === "offline" ? [] : previousSession ? [previousSession] : [],
+        previousSession?.state === "offline" ? [previousSession] : [],
+      );
+  const previousState = previousSession?.state ?? null;
+  const nextState = nextSession.state;
+
+  if (!previousSession) {
+    nextMeta.trackedCount += 1;
+    if (nextState === "offline") {
+      nextMeta.offlineCount += 1;
+    } else {
+      nextMeta.liveCount += 1;
+    }
+  } else if (previousState === "offline" && nextState !== "offline") {
+    nextMeta.offlineCount = Math.max(0, nextMeta.offlineCount - 1);
+    nextMeta.liveCount += 1;
+  } else if (previousState !== "offline" && nextState === "offline") {
+    nextMeta.liveCount = Math.max(0, nextMeta.liveCount - 1);
+    nextMeta.offlineCount += 1;
+  }
+
+  nextMeta.hasMoreHistory = nextMeta.offlineCount > loadedHistoryCount;
+  nextMeta.nextBefore =
+    nextMeta.hasMoreHistory && loadedHistoryCount > 0 ? nextSession.updatedAt : null;
+  return nextMeta;
 }
 
 function describeActivityLabel(item: {
@@ -140,7 +243,10 @@ export const useOfficeStore = create<OfficeState>((set) => ({
   account: null,
   activityBySession: {},
   connection: "connecting",
+  historySessions: [],
   layout: null,
+  liveSessions: [],
+  sessionMeta: null,
   sessions: [],
   lastMutationAt: Date.now(),
   setAccount(account) {
@@ -155,18 +261,99 @@ export const useOfficeStore = create<OfficeState>((set) => ({
       lastMutationAt: Date.now(),
     });
   },
-  setSnapshot(sessions) {
+  setLiveSnapshot(sessions, meta) {
+    set((state) => {
+      const nextLiveSessions = sortSessions(
+        sessions.filter((session) => session.state !== "offline"),
+      );
+      const liveIds = new Set(nextLiveSessions.map((session) => session.sessionId));
+      const nextHistorySessions = sortSessions(
+        state.historySessions.filter((session) => !liveIds.has(session.sessionId)),
+      );
+      const nextSessions = buildCombinedSessions(nextLiveSessions, nextHistorySessions);
+
+      return {
+        activityBySession: seedActivities(nextSessions, state.activityBySession),
+        liveSessions: nextLiveSessions,
+        historySessions: nextHistorySessions,
+        sessionMeta: mergeQueryMeta(state.sessionMeta, meta),
+        sessions: nextSessions,
+        lastMutationAt: Date.now(),
+      };
+    });
+  },
+  setHistoryPage(sessions, meta, mode) {
+    set((state) => {
+      const liveIds = new Set(state.liveSessions.map((session) => session.sessionId));
+      const nextHistorySessions = (
+        mode === "replace" ? sortSessions(sessions) : mergeSessions(state.historySessions, sessions)
+      ).filter((session) => session.state === "offline" && !liveIds.has(session.sessionId));
+      const nextSessions = buildCombinedSessions(state.liveSessions, nextHistorySessions);
+
+      return {
+        activityBySession: seedActivities(nextSessions, state.activityBySession),
+        historySessions: nextHistorySessions,
+        sessionMeta: mergeQueryMeta(state.sessionMeta, meta),
+        sessions: nextSessions,
+        lastMutationAt: Date.now(),
+      };
+    });
+  },
+  setSnapshot(sessions, meta) {
     set((state) => ({
       activityBySession: seedActivities(sessions, state.activityBySession),
+      historySessions: sortSessions(sessions.filter((session) => session.state === "offline")),
+      liveSessions: sortSessions(sessions.filter((session) => session.state !== "offline")),
+      sessionMeta: meta ? mergeQueryMeta(state.sessionMeta, meta) : state.sessionMeta,
       sessions: sortSessions(sessions),
       lastMutationAt: Date.now(),
     }));
   },
   applyEnvelope(envelope) {
-    set((state) => ({
-      activityBySession: appendActivity(state.activityBySession, envelope),
-      sessions: envelope.session ? upsertSession(state.sessions, envelope.session) : state.sessions,
-      lastMutationAt: Date.now(),
-    }));
+    set((state) => {
+      if (!envelope.session) {
+        return {
+          activityBySession: appendActivity(state.activityBySession, envelope),
+          lastMutationAt: Date.now(),
+        };
+      }
+
+      const previousSession =
+        state.liveSessions.find((session) => session.sessionId === envelope.session?.sessionId) ??
+        state.historySessions.find((session) => session.sessionId === envelope.session?.sessionId);
+
+      const liveSessions =
+        envelope.session.state === "offline"
+          ? state.liveSessions.filter(
+              (session) => session.sessionId !== envelope.session?.sessionId,
+            )
+          : upsertSession(state.liveSessions, envelope.session);
+      const historySessions =
+        envelope.session.state === "offline"
+          ? upsertSession(
+              state.historySessions.filter(
+                (session) => session.sessionId !== envelope.session?.sessionId,
+              ),
+              envelope.session,
+            )
+          : state.historySessions.filter(
+              (session) => session.sessionId !== envelope.session?.sessionId,
+            );
+      const nextSessions = buildCombinedSessions(liveSessions, historySessions);
+
+      return {
+        activityBySession: appendActivity(state.activityBySession, envelope),
+        historySessions,
+        liveSessions,
+        sessionMeta: patchMetaForSession(
+          state.sessionMeta,
+          previousSession,
+          envelope.session,
+          historySessions.length,
+        ),
+        sessions: nextSessions,
+        lastMutationAt: Date.now(),
+      };
+    });
   },
 }));

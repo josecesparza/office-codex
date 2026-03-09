@@ -1,67 +1,76 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
-import { agentPalette, defaultOfficeLayout, officePalette } from "@office-codex/assets";
-import type { AgentSession, DeskAnchor, OfficeLayout } from "@office-codex/core";
+import { officePalette } from "@office-codex/assets";
+import type { DeskAnchor, OfficeLayout } from "@office-codex/core";
+
+import {
+  type OfficeRenderSession,
+  type SessionGeometry,
+  createDeskBadgeMap,
+  getHeatmapIntensity,
+  hashString,
+} from "../lib/office-ui";
 
 interface OfficeCanvasProps {
   hoveredSessionId?: string | null;
-  layout: OfficeLayout | null;
-  onHoveredSessionChange?: (sessionId: string | null) => void;
-  sessions: AgentSession[];
   lastMutationAt: number;
+  layout: OfficeLayout;
+  onHoveredSessionChange?: (sessionId: string | null) => void;
+  onSelectedSessionChange?: (sessionId: string | null) => void;
+  onSessionGeometryChange?: (geometries: Record<string, SessionGeometry>) => void;
+  selectedSessionId?: string | null;
+  sessions: OfficeRenderSession[];
 }
 
 interface AgentSlot {
-  session: AgentSession;
+  overflow: boolean;
+  renderSession: OfficeRenderSession;
   x: number;
   y: number;
-  overflow: boolean;
+}
+
+interface AgentAnimationState {
+  badgePulse: number;
+  blinkClosed: boolean;
+  bodyOffsetY: number;
+  headOffsetX: number;
+  headOffsetY: number;
+  talkPulse: number;
+  toolPulse: number;
 }
 
 const SCALE = 4;
 const ACTIVE_FPS = 20;
 const IDLE_FPS = 4;
 
-function resolveDesk(
-  session: AgentSession,
-  layout: OfficeLayout,
-  index: number,
-): DeskAnchor | null {
-  if (session.seatId) {
-    const exactDesk = layout.desks.find((desk) => desk.id === session.seatId);
-    if (exactDesk) {
-      return exactDesk;
-    }
-  }
-
-  return layout.desks[index] ?? null;
-}
-
-function resolveSlots(layout: OfficeLayout, sessions: AgentSession[]): AgentSlot[] {
-  return sessions.map((session, index) => {
-    const desk = resolveDesk(session, layout, index);
-
-    if (desk) {
+function resolveSlots(layout: OfficeLayout, sessions: OfficeRenderSession[]): AgentSlot[] {
+  return sessions.map((renderSession) => {
+    if (renderSession.desk) {
       return {
-        session,
-        x: desk.x * layout.tileSize,
-        y: desk.y * layout.tileSize,
         overflow: false,
+        renderSession,
+        x: renderSession.desk.x * layout.tileSize,
+        y: renderSession.desk.y * layout.tileSize,
       };
     }
 
-    const overflowIndex = index - layout.desks.length;
+    const overflowIndex = renderSession.overflowIndex ?? 0;
     const column = overflowIndex % 6;
     const row = Math.floor(overflowIndex / 6);
 
     return {
-      session,
+      overflow: true,
+      renderSession,
       x: (1 + column * 2) * layout.tileSize,
       y: (layout.height - 1 + row) * layout.tileSize,
-      overflow: true,
     };
   });
+}
+
+function getCanvasRows(layout: OfficeLayout, sessions: OfficeRenderSession[]): number {
+  const overflowCount = sessions.filter((session) => session.overflow).length;
+  return layout.height + Math.ceil(overflowCount / 6);
 }
 
 function getHoveredSessionId(slots: AgentSlot[], x: number, y: number): string | null {
@@ -75,22 +84,26 @@ function getHoveredSessionId(slots: AgentSlot[], x: number, y: number): string |
     const agentX = slot.x + 8;
     const agentY = slot.y - 4;
 
-    if (x >= agentX - 2 && x <= agentX + 14 && y >= agentY && y <= agentY + 22) {
-      return slot.session.sessionId;
+    if (x >= agentX - 3 && x <= agentX + 15 && y >= agentY && y <= agentY + 24) {
+      return slot.renderSession.session.sessionId;
     }
   }
 
   return null;
 }
 
-function drawBackground(ctx: CanvasRenderingContext2D, layout: OfficeLayout): void {
+function drawBackground(
+  ctx: CanvasRenderingContext2D,
+  layout: OfficeLayout,
+  totalRows: number,
+): void {
   const width = layout.width * layout.tileSize;
-  const height = layout.height * layout.tileSize;
+  const height = totalRows * layout.tileSize;
 
   ctx.fillStyle = officePalette.background;
   ctx.fillRect(0, 0, width, height);
 
-  for (let row = 0; row < layout.height; row += 1) {
+  for (let row = 0; row < totalRows; row += 1) {
     for (let column = 0; column < layout.width; column += 1) {
       ctx.fillStyle = (row + column) % 2 === 0 ? officePalette.floor : officePalette.overflow;
       ctx.fillRect(
@@ -107,27 +120,132 @@ function drawBackground(ctx: CanvasRenderingContext2D, layout: OfficeLayout): vo
   ctx.strokeRect(1.5, 1.5, width - 3, height - 3);
 }
 
-function drawDesk(ctx: CanvasRenderingContext2D, layout: OfficeLayout, desk: DeskAnchor): void {
+function drawDeskHeatmap(
+  ctx: CanvasRenderingContext2D,
+  slot: AgentSlot,
+  intensity: number,
+  color: string,
+): void {
+  if (intensity <= 0) {
+    return;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = Math.min(0.28, intensity * 0.24);
+  ctx.fillStyle = color;
+  ctx.fillRect(slot.x - 8, slot.y + 10, 34, 10);
+  ctx.globalAlpha = Math.min(0.18, intensity * 0.14);
+  ctx.fillRect(slot.x - 12, slot.y + 6, 42, 18);
+  ctx.restore();
+}
+
+function drawDeskLabel(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  badge: string,
+  accentColor: string | null,
+): void {
+  ctx.fillStyle = accentColor ? accentColor : "#f6e5ba";
+  ctx.fillRect(x + 1, y + 14, 14, 6);
+  ctx.fillStyle = officePalette.wall;
+  ctx.fillRect(x + 2, y + 15, 12, 4);
+  ctx.fillStyle = accentColor ? "#fff7ec" : "#fef3c7";
+  ctx.font = "5px Menlo, monospace";
+  ctx.fillText(badge, x + 3, y + 18.5);
+}
+
+function drawDeskHalo(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  color: string,
+  style: "selected" | "focused" | "blocked",
+): void {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = style === "selected" ? 2 : 1;
+  ctx.strokeRect(x - 4.5, y - 1.5, 30, 17);
+
+  if (style === "selected") {
+    ctx.fillStyle = color;
+    ctx.fillRect(x - 6, y + 14, 34, 2);
+  }
+
+  if (style === "blocked") {
+    ctx.fillStyle = color;
+    ctx.fillRect(x + 10, y - 4, 4, 4);
+  }
+
+  ctx.restore();
+}
+
+function drawDesk(
+  ctx: CanvasRenderingContext2D,
+  layout: OfficeLayout,
+  desk: DeskAnchor,
+  badge: string,
+  options: {
+    accentColor: string | null;
+    badgePulse: number;
+    isBlocked: boolean;
+    isFocused: boolean;
+    isSelected: boolean;
+    isTooling: boolean;
+  },
+): void {
   const x = desk.x * layout.tileSize;
   const y = desk.y * layout.tileSize;
   const size = layout.tileSize;
+
+  if (options.isBlocked) {
+    drawDeskHalo(ctx, x, y + 2, "#dc2626", "blocked");
+  } else if (options.isSelected) {
+    drawDeskHalo(ctx, x, y + 2, options.accentColor ?? officePalette.accent, "selected");
+  } else if (options.isFocused) {
+    drawDeskHalo(ctx, x, y + 2, options.accentColor ?? officePalette.accent, "focused");
+  }
 
   ctx.fillStyle = officePalette.deskShadow;
   ctx.fillRect(x + 2, y + 9, size + 10, 5);
   ctx.fillStyle = officePalette.desk;
   ctx.fillRect(x, y + 2, size + 10, 10);
+
+  if (options.isTooling && options.accentColor) {
+    ctx.save();
+    ctx.globalAlpha = 0.2 + options.badgePulse * 0.12;
+    ctx.fillStyle = options.accentColor;
+    ctx.fillRect(x + 3, y + 4, size - 2, 3);
+    ctx.restore();
+  }
+
   ctx.fillStyle = officePalette.wall;
   ctx.fillRect(x + 3, y + 4, size - 2, 2);
+  drawDeskLabel(ctx, x, y, badge, options.accentColor);
 }
 
-function drawBadge(ctx: CanvasRenderingContext2D, x: number, y: number, color: string): void {
+function drawBadge(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  color: string,
+  pulse: number,
+): void {
+  const size = 7 + Math.round(pulse * 1.5);
+
   ctx.fillStyle = color;
-  ctx.fillRect(x, y, 8, 8);
+  ctx.fillRect(x, y, size, size);
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(x + 2, y + 2, 4, 4);
+  ctx.fillRect(x + 2, y + 2, Math.max(3, size - 4), Math.max(3, size - 4));
 }
 
-function drawHoveredAgentAccent(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+function drawFocusedAgentAccent(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  color: string,
+  selected: boolean,
+): void {
   ctx.fillStyle = "#fff7c2";
   ctx.fillRect(x + 1, y + 1, 10, 1);
   ctx.fillRect(x + 1, y + 10, 10, 1);
@@ -139,74 +257,127 @@ function drawHoveredAgentAccent(ctx: CanvasRenderingContext2D, x: number, y: num
   ctx.fillRect(x - 1, y + 8, 1, 12);
   ctx.fillRect(x + 12, y + 8, 1, 12);
 
-  ctx.fillStyle = officePalette.accent;
+  ctx.fillStyle = color;
   ctx.fillRect(x - 3, y + 3, 2, 2);
   ctx.fillRect(x + 13, y + 3, 2, 2);
   ctx.fillRect(x - 3, y + 17, 2, 2);
   ctx.fillRect(x + 13, y + 17, 2, 2);
 
+  if (selected) {
+    ctx.fillRect(x - 5, y + 22, 22, 3);
+    ctx.fillStyle = "#fff3a8";
+    ctx.fillRect(x - 2, y + 23, 16, 1);
+    return;
+  }
+
   ctx.fillStyle = "#fff3a8";
-  ctx.fillRect(x - 4, y + 22, 20, 3);
-  ctx.fillStyle = officePalette.accent;
-  ctx.fillRect(x - 2, y + 23, 16, 1);
+  ctx.fillRect(x - 4, y + 22, 20, 2);
+}
+
+function getAnimationState(
+  slot: AgentSlot,
+  now: number,
+  motionEnabled: boolean,
+): AgentAnimationState {
+  const phase = (hashString(slot.renderSession.session.sessionId) % 997) / 997;
+  const movement = motionEnabled ? Math.sin(now / 420 + phase * Math.PI * 2) : 0;
+  const drift = motionEnabled ? Math.sin(now / 860 + phase * Math.PI * 2) : 0;
+  const badgePulse = motionEnabled ? (Math.sin(now / 320 + phase * Math.PI * 2) + 1) / 2 : 0.2;
+  const blinkClosed = motionEnabled ? (now + phase * 4700) % 4700 < 120 : false;
+
+  return {
+    badgePulse,
+    blinkClosed,
+    bodyOffsetY: Math.round(drift * (slot.renderSession.session.state === "offline" ? 0 : 1)),
+    headOffsetX:
+      slot.renderSession.session.state === "thinking" && motionEnabled ? Math.round(movement) : 0,
+    headOffsetY:
+      slot.renderSession.session.state === "thinking" && motionEnabled
+        ? Math.round((drift + 1) * 0.6)
+        : Math.round(drift * 0.5),
+    talkPulse:
+      slot.renderSession.session.state === "responding" && motionEnabled ? badgePulse + 0.2 : 0,
+    toolPulse: slot.renderSession.session.state === "using_tool" && motionEnabled ? badgePulse : 0,
+  };
 }
 
 function drawAgent(
   ctx: CanvasRenderingContext2D,
   slot: AgentSlot,
-  index: number,
   options: {
-    hasHoveredSession: boolean;
-    isHovered: boolean;
+    hasFocusedSession: boolean;
+    isFocused: boolean;
+    isSelected: boolean;
+    motionEnabled: boolean;
+    now: number;
   },
 ): void {
-  const color = agentPalette[index % agentPalette.length] ?? officePalette.accent;
+  const { accentColor, isBlocked, session, variant } = slot.renderSession;
+  const animation = getAnimationState(slot, options.now, options.motionEnabled);
   const x = slot.x + 8;
-  const y = slot.y - 4;
+  const y = slot.y - 4 + animation.bodyOffsetY;
+  const headX = x + animation.headOffsetX;
+  const headY = y + 2 + animation.headOffsetY;
+  const bodyWidth = variant === 1 ? 10 : 12;
 
   ctx.save();
-  const baseAlpha = slot.session.state === "offline" ? 0.38 : 1;
-  ctx.globalAlpha = options.hasHoveredSession && !options.isHovered ? baseAlpha * 0.52 : baseAlpha;
+  const baseAlpha = session.state === "offline" ? 0.38 : 1;
+  ctx.globalAlpha = options.hasFocusedSession && !options.isFocused ? baseAlpha * 0.52 : baseAlpha;
 
-  if (options.isHovered) {
-    drawHoveredAgentAccent(ctx, x, y);
+  if (options.isFocused) {
+    drawFocusedAgentAccent(ctx, x, y, accentColor, options.isSelected);
   }
 
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y + 8, 12, 12);
-  ctx.fillRect(x + 2, y + 2, 8, 8);
+  ctx.fillStyle = accentColor;
+  ctx.fillRect(x + Math.max(0, (12 - bodyWidth) / 2), y + 8, bodyWidth, 12);
+  ctx.fillRect(headX + 2, headY, 8, 8);
   ctx.fillStyle = officePalette.wall;
-  ctx.fillRect(x + 3, y + 4, 2, 2);
-  ctx.fillRect(x + 7, y + 4, 2, 2);
 
-  if (slot.session.state === "thinking") {
-    drawBadge(ctx, x + 14, y - 2, "#1d4ed8");
+  if (animation.blinkClosed) {
+    ctx.fillRect(headX + 3, headY + 4, 2, 1);
+    ctx.fillRect(headX + 7, headY + 4, 2, 1);
+  } else {
+    ctx.fillRect(headX + 3, headY + 3, 2, 2);
+    ctx.fillRect(headX + 7, headY + 3, 2, 2);
   }
 
-  if (slot.session.state === "using_tool") {
+  if (session.state === "thinking") {
+    drawBadge(ctx, x + 14, y - 2, "#1d4ed8", animation.badgePulse);
+  }
+
+  if (session.state === "using_tool") {
     ctx.fillStyle = officePalette.accent;
     ctx.fillRect(x + 1, y + 18, 10, 2);
-    ctx.fillRect(x + 12, y + 18, 4, 2);
+    ctx.fillRect(x + 12, y + 18, 4 + Math.round(animation.toolPulse), 2);
   }
 
-  if (slot.session.state === "responding") {
-    drawBadge(ctx, x + 14, y - 2, "#f3f4f6");
+  if (session.state === "responding") {
+    drawBadge(ctx, x + 14, y - 2, "#f3f4f6", animation.badgePulse);
+    if (animation.talkPulse > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.18 + animation.talkPulse * 0.2;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x + 15, y + 6, 8, 6);
+      ctx.fillRect(x + 13, y + 10, 4, 2);
+      ctx.restore();
+    }
   }
 
-  if (slot.session.state === "waiting_user") {
-    drawBadge(ctx, x + 14, y - 2, "#f97316");
+  if (session.state === "waiting_user") {
+    drawBadge(ctx, x + 14, y - 2, "#f97316", animation.badgePulse);
   }
 
-  if (slot.session.state === "error") {
-    drawBadge(ctx, x + 14, y - 2, "#dc2626");
+  if (session.state === "error") {
+    drawBadge(ctx, x + 14, y - 2, "#dc2626", animation.badgePulse);
   }
 
-  if (slot.session.activeSubtasks > 0) {
-    for (
-      let badgeIndex = 0;
-      badgeIndex < Math.min(slot.session.activeSubtasks, 3);
-      badgeIndex += 1
-    ) {
+  if (isBlocked) {
+    ctx.fillStyle = "#dc2626";
+    ctx.fillRect(x + 4, y - 4, 4, 2);
+  }
+
+  if (session.activeSubtasks > 0) {
+    for (let badgeIndex = 0; badgeIndex < Math.min(session.activeSubtasks, 3); badgeIndex += 1) {
       ctx.fillStyle = "#111827";
       ctx.fillRect(x - 6 - badgeIndex * 4, y + 14, 3, 3);
     }
@@ -223,19 +394,113 @@ function drawAgent(
 
 export function OfficeCanvas(props: OfficeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const effectiveLayout = props.layout ?? defaultOfficeLayout;
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const slots = useMemo(
-    () => resolveSlots(effectiveLayout, props.sessions),
-    [effectiveLayout, props.sessions],
+    () => resolveSlots(props.layout, props.sessions),
+    [props.layout, props.sessions],
   );
-  const hasHoveredSession = useMemo(
+  const totalRows = useMemo(
+    () => getCanvasRows(props.layout, props.sessions),
+    [props.layout, props.sessions],
+  );
+  const focusedSessionId =
+    props.selectedSessionId ?? (!props.selectedSessionId ? props.hoveredSessionId : null);
+  const hasFocusedSession = useMemo(
     () =>
       Boolean(
-        props.hoveredSessionId &&
-          props.sessions.some((session) => session.sessionId === props.hoveredSessionId),
+        focusedSessionId &&
+          props.sessions.some(
+            (renderSession) => renderSession.session.sessionId === focusedSessionId,
+          ),
       ),
-    [props.hoveredSessionId, props.sessions],
+    [focusedSessionId, props.sessions],
   );
+  const deskBadgeMap = useMemo(() => createDeskBadgeMap(props.layout), [props.layout]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    const updatePreference = () => {
+      setPrefersReducedMotion(mediaQuery.matches);
+    };
+
+    updatePreference();
+    mediaQuery.addEventListener("change", updatePreference);
+
+    return () => {
+      mediaQuery.removeEventListener("change", updatePreference);
+    };
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const onSessionGeometryChange = props.onSessionGeometryChange;
+
+    if (!canvas || !onSessionGeometryChange) {
+      return;
+    }
+
+    const reportGeometries = () => {
+      const parent = canvas.parentElement;
+
+      if (!parent) {
+        return;
+      }
+
+      const canvasRect = canvas.getBoundingClientRect();
+      const parentRect = parent.getBoundingClientRect();
+      const scaleX = canvasRect.width / canvas.width;
+      const scaleY = canvasRect.height / canvas.height;
+      const geometries: Record<string, SessionGeometry> = {};
+
+      for (const slot of slots) {
+        const deskBounds = {
+          height: 16 * scaleY,
+          width: 26 * scaleX,
+          x: canvasRect.left - parentRect.left + (slot.x - 2) * scaleX,
+          y: canvasRect.top - parentRect.top + (slot.y + 1) * scaleY,
+        };
+        const agentBounds = {
+          height: 24 * scaleY,
+          width: 18 * scaleX,
+          x: canvasRect.left - parentRect.left + (slot.x + 5) * scaleX,
+          y: canvasRect.top - parentRect.top + (slot.y - 4) * scaleY,
+        };
+
+        geometries[slot.renderSession.session.sessionId] = {
+          agentBounds,
+          agentCenter: {
+            x: agentBounds.x + agentBounds.width / 2,
+            y: agentBounds.y + agentBounds.height / 2,
+          },
+          deskBounds,
+          deskCenter: {
+            x: deskBounds.x + deskBounds.width / 2,
+            y: deskBounds.y + deskBounds.height / 2,
+          },
+        };
+      }
+
+      onSessionGeometryChange(geometries);
+    };
+
+    const frameId = window.requestAnimationFrame(reportGeometries);
+
+    const observer = new ResizeObserver(reportGeometries);
+    observer.observe(canvas);
+
+    if (canvas.parentElement) {
+      observer.observe(canvas.parentElement);
+    }
+
+    window.addEventListener("resize", reportGeometries);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      observer.disconnect();
+      window.removeEventListener("resize", reportGeometries);
+    };
+  }, [props.onSessionGeometryChange, slots]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -250,13 +515,8 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
       return;
     }
 
-    const width = effectiveLayout.width * effectiveLayout.tileSize;
-    const height = Math.max(
-      effectiveLayout.height * effectiveLayout.tileSize,
-      (effectiveLayout.height +
-        Math.max(0, Math.ceil((props.sessions.length - effectiveLayout.desks.length) / 6))) *
-        effectiveLayout.tileSize,
-    );
+    const width = props.layout.width * props.layout.tileSize;
+    const height = totalRows * props.layout.tileSize;
 
     canvas.width = width;
     canvas.height = height;
@@ -267,18 +527,60 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     let frameId = 0;
     let lastFrame = 0;
 
-    const draw = () => {
+    const draw = (now: number) => {
+      const realNow = Date.now();
       ctx.imageSmoothingEnabled = false;
-      drawBackground(ctx, effectiveLayout);
+      drawBackground(ctx, props.layout, totalRows);
 
-      for (const desk of effectiveLayout.desks) {
-        drawDesk(ctx, effectiveLayout, desk);
+      for (const slot of slots) {
+        if (!slot.renderSession.desk) {
+          continue;
+        }
+
+        drawDeskHeatmap(
+          ctx,
+          slot,
+          getHeatmapIntensity(slot.renderSession.session, realNow),
+          slot.renderSession.accentColor,
+        );
       }
 
-      for (const [index, slot] of slots.entries()) {
-        drawAgent(ctx, slot, index, {
-          hasHoveredSession,
-          isHovered: slot.session.sessionId === props.hoveredSessionId,
+      for (const desk of props.layout.desks) {
+        const occupant =
+          props.sessions.find((renderSession) => renderSession.desk?.id === desk.id) ?? null;
+        const occupantSessionId = occupant?.session.sessionId ?? null;
+        const isSelected = occupantSessionId === props.selectedSessionId;
+        const isFocused = occupantSessionId === focusedSessionId;
+
+        drawDesk(ctx, props.layout, desk, deskBadgeMap.get(desk.id) ?? desk.label, {
+          accentColor: occupant?.accentColor ?? null,
+          badgePulse:
+            occupant?.session.state === "using_tool" || occupant?.session.state === "thinking"
+              ? getAnimationState(
+                  {
+                    overflow: false,
+                    renderSession: occupant,
+                    x: desk.x * props.layout.tileSize,
+                    y: desk.y * props.layout.tileSize,
+                  },
+                  now,
+                  !prefersReducedMotion,
+                ).badgePulse
+              : 0,
+          isBlocked: occupant?.isBlocked ?? false,
+          isFocused,
+          isSelected,
+          isTooling: occupant?.session.state === "using_tool",
+        });
+      }
+
+      for (const slot of slots) {
+        drawAgent(ctx, slot, {
+          hasFocusedSession,
+          isFocused: slot.renderSession.session.sessionId === focusedSessionId,
+          isSelected: slot.renderSession.session.sessionId === props.selectedSessionId,
+          motionEnabled: !prefersReducedMotion,
+          now,
         });
       }
     };
@@ -289,43 +591,55 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
       const frameInterval = 1000 / targetFps;
 
       if (!document.hidden && now - lastFrame >= frameInterval) {
-        draw();
+        draw(now);
         lastFrame = now;
       }
 
       frameId = window.requestAnimationFrame(tick);
     };
 
-    draw();
+    draw(performance.now());
     frameId = window.requestAnimationFrame(tick);
 
     return () => {
       window.cancelAnimationFrame(frameId);
     };
   }, [
-    effectiveLayout,
-    hasHoveredSession,
-    props.hoveredSessionId,
+    deskBadgeMap,
+    focusedSessionId,
+    hasFocusedSession,
+    prefersReducedMotion,
     props.lastMutationAt,
-    props.sessions.length,
+    props.layout,
+    props.selectedSessionId,
+    props.sessions,
     slots,
+    totalRows,
   ]);
 
+  const resolveSessionFromPointer = useCallback(
+    (event: ReactMouseEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+
+      if (!canvas) {
+        return null;
+      }
+
+      const bounds = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / bounds.width;
+      const scaleY = canvas.height / bounds.height;
+
+      return getHoveredSessionId(
+        slots,
+        (event.clientX - bounds.left) * scaleX,
+        (event.clientY - bounds.top) * scaleY,
+      );
+    },
+    [slots],
+  );
+
   const handleMouseMove = (event: ReactMouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-
-    if (!canvas) {
-      return;
-    }
-
-    const bounds = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / bounds.width;
-    const scaleY = canvas.height / bounds.height;
-    const hoveredSessionId = getHoveredSessionId(
-      slots,
-      (event.clientX - bounds.left) * scaleX,
-      (event.clientY - bounds.top) * scaleY,
-    );
+    const hoveredSessionId = resolveSessionFromPointer(event);
 
     event.currentTarget.style.cursor = hoveredSessionId ? "pointer" : "default";
     props.onHoveredSessionChange?.(hoveredSessionId);
@@ -336,11 +650,17 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     props.onHoveredSessionChange?.(null);
   };
 
+  const handleMouseUp = (event: ReactMouseEvent<HTMLCanvasElement>) => {
+    const clickedSessionId = resolveSessionFromPointer(event);
+    props.onSelectedSessionChange?.(clickedSessionId);
+  };
+
   return (
     <canvas
       className="office-canvas"
       onMouseLeave={handleMouseLeave}
       onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
       ref={canvasRef}
     />
   );

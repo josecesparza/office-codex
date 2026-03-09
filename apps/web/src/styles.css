@@ -123,12 +123,17 @@ body {
 }
 
 .stage-header,
+.panel-header,
 .session-card-head,
 .stage-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.panel-header {
+  align-items: flex-start;
 }
 
 .stage-meta {
@@ -157,6 +162,49 @@ body {
 .session-panel {
   display: grid;
   gap: 14px;
+}
+
+.panel-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.panel-button {
+  padding: 10px 14px;
+  border: 1px solid rgba(32, 26, 21, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #201a15;
+  font: inherit;
+  cursor: pointer;
+  transition: transform 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+
+.panel-button:hover {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(32, 26, 21, 0.24);
+  transform: translateY(-1px);
+}
+
+.panel-button-secondary {
+  justify-self: start;
+}
+
+.panel-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #6f6258;
+  font-family: "Menlo", "Monaco", monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel-summary-note {
+  margin: -6px 0 0;
+  color: #6f6258;
+  font-size: 14px;
 }
 
 .session-list {
@@ -258,6 +306,14 @@ body {
 
   .topbar {
     grid-template-columns: 1fr;
+  }
+
+  .panel-header {
+    flex-direction: column;
+  }
+
+  .panel-actions {
+    justify-content: flex-start;
   }
 
   .session-card dl {

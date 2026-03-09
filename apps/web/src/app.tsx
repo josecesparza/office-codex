@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { officePalette } from "@office-codex/assets";
 
@@ -6,6 +6,9 @@ import { OfficeCanvas } from "./components/office-canvas";
 import { basename, formatRelative } from "./lib/format";
 import { useOfficeStore } from "./lib/office-store";
 import { useOfficeData } from "./lib/use-office-data";
+
+const ROSTER_LIVE_LIMIT = 20;
+const OFFLINE_PAGE_SIZE = 20;
 
 const stateLabels: Record<string, string> = {
   inactive: "Idle",
@@ -24,6 +27,34 @@ export function App() {
   const layout = useOfficeStore((state) => state.layout);
   const sessions = useOfficeStore((state) => state.sessions);
   const lastMutationAt = useOfficeStore((state) => state.lastMutationAt);
+  const [showOfflineHistory, setShowOfflineHistory] = useState(false);
+  const [offlineLimit, setOfflineLimit] = useState(OFFLINE_PAGE_SIZE);
+
+  const liveSessions = useMemo(
+    () => sessions.filter((session) => session.state !== "offline"),
+    [sessions],
+  );
+  const offlineSessions = useMemo(
+    () => sessions.filter((session) => session.state === "offline"),
+    [sessions],
+  );
+  const visibleLiveSessions = useMemo(
+    () => liveSessions.slice(0, ROSTER_LIVE_LIMIT),
+    [liveSessions],
+  );
+  const visibleOfflineSessions = useMemo(
+    () => offlineSessions.slice(0, offlineLimit),
+    [offlineLimit, offlineSessions],
+  );
+  const rosterSessions = useMemo(
+    () =>
+      showOfflineHistory
+        ? [...visibleLiveSessions, ...visibleOfflineSessions]
+        : visibleLiveSessions,
+    [showOfflineHistory, visibleLiveSessions, visibleOfflineSessions],
+  );
+  const hiddenOfflineCount = Math.max(offlineSessions.length - visibleOfflineSessions.length, 0);
+  const hiddenLiveCount = Math.max(liveSessions.length - visibleLiveSessions.length, 0);
 
   const metrics = useMemo(
     () => ({
@@ -71,7 +102,7 @@ export function App() {
             </div>
             <div className="stage-meta">
               <span>{layout?.desks.length ?? 0} desks</span>
-              <span>{sessions.length} sessions</span>
+              <span>{liveSessions.length} live now</span>
             </div>
           </div>
           <div
@@ -80,26 +111,54 @@ export function App() {
               boxShadow: `0 18px 60px color-mix(in srgb, ${officePalette.accent} 16%, transparent)`,
             }}
           >
-            <OfficeCanvas layout={layout} sessions={sessions} lastMutationAt={lastMutationAt} />
+            <OfficeCanvas layout={layout} sessions={liveSessions} lastMutationAt={lastMutationAt} />
           </div>
         </section>
 
         <aside className="session-panel">
           <div className="panel-header">
-            <h2>Session roster</h2>
-            <p>Metadata only. No prompt or response text leaves the daemon.</p>
+            <div>
+              <h2>Session roster</h2>
+              <p>Metadata only. No prompt or response text leaves the daemon.</p>
+            </div>
+            <div className="panel-actions">
+              {offlineSessions.length > 0 ? (
+                <button
+                  className="panel-button"
+                  onClick={() => setShowOfflineHistory((current) => !current)}
+                  type="button"
+                >
+                  {showOfflineHistory
+                    ? `Hide offline history (${offlineSessions.length})`
+                    : `Show offline history (${offlineSessions.length})`}
+                </button>
+              ) : null}
+            </div>
           </div>
 
-          {sessions.length === 0 ? (
+          <div className="panel-summary">
+            <span>{liveSessions.length} live</span>
+            <span>{offlineSessions.length} offline</span>
+            <span>showing {rosterSessions.length}</span>
+          </div>
+
+          {hiddenLiveCount > 0 ? (
+            <p className="panel-summary-note">
+              Showing the 20 most recent live sessions in the roster.
+            </p>
+          ) : null}
+
+          {rosterSessions.length === 0 ? (
             <div className="empty-card">
-              <strong>No Codex sessions yet.</strong>
+              <strong>No live sessions right now.</strong>
               <p>
-                Start one with `office-codex run -- ...` or keep the daemon open until one appears.
+                Start one with `office-codex run -- ...`. You can still inspect the offline history
+                whenever you need it.
               </p>
             </div>
           ) : (
             <div className="session-list">
-              {sessions.map((session) => (
+              {rosterSessions.map((session) => (
                 <article className="session-card" key={session.sessionId}>
                   <div className="session-card-head">
                     <div>
@@ -132,6 +191,16 @@ export function App() {
               ))}
             </div>
           )}
+
+          {showOfflineHistory && hiddenOfflineCount > 0 ? (
+            <button
+              className="panel-button panel-button-secondary"
+              onClick={() => setOfflineLimit((current) => current + OFFLINE_PAGE_SIZE)}
+              type="button"
+            >
+              Show 20 more offline sessions ({hiddenOfflineCount} remaining)
+            </button>
+          ) : null}
         </aside>
       </main>
     </div>

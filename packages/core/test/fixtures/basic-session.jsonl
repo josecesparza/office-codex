@@ -1,0 +1,7 @@
+{"timestamp":"2026-03-09T18:46:36.704Z","type":"session_meta","payload":{"id":"session-basic","timestamp":"2026-03-09T18:46:36.704Z","cwd":"/workspace/demo","originator":"Codex Desktop","cli_version":"0.108.0-alpha.12","source":"vscode","model_provider":"openai"}}
+{"timestamp":"2026-03-09T18:46:37.100Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1","collaboration_mode_kind":"default"}}
+{"timestamp":"2026-03-09T18:46:37.300Z","type":"response_item","payload":{"type":"reasoning","summary":[],"content":null}}
+{"timestamp":"2026-03-09T18:46:38.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}","call_id":"call-1"}}
+{"timestamp":"2026-03-09T18:46:38.050Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"Output:\\n/workspace/demo\\n"}}
+{"timestamp":"2026-03-09T18:46:39.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[]}}
+{"timestamp":"2026-03-09T18:46:40.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","last_agent_message":"Done"}} 

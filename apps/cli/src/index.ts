@@ -12,11 +12,7 @@ import {
   resolveDaemonConfig,
   startDaemon,
 } from "@office-codex/daemon";
-
-interface ParsedCommand {
-  command: string;
-  args: string[];
-}
+import { parseCommand, stripRunSeparator } from "./command-helpers.js";
 
 const HELP = `office-codex
 
@@ -25,15 +21,6 @@ Commands:
   run -- [args...]    Launch Codex through the wrapper
   doctor              Validate local Codex sources
 `;
-
-function parseCommand(argv: string[]): ParsedCommand {
-  const normalized = argv[0] === "--" ? argv.slice(1) : argv;
-  const [command = "dashboard", ...rest] = normalized;
-  return {
-    command,
-    args: rest,
-  };
-}
 
 async function isExecutable(path: string): Promise<boolean> {
   try {
@@ -56,14 +43,6 @@ async function resolveCodexBinary(): Promise<string | null> {
 
   const fallback = "/Applications/Codex.app/Contents/Resources/codex";
   return (await isExecutable(fallback)) ? fallback : null;
-}
-
-function stripRunSeparator(args: string[]): string[] {
-  if (args[0] === "--") {
-    return args.slice(1);
-  }
-
-  return args;
 }
 
 async function runDashboard(): Promise<void> {

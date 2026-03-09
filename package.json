@@ -1,0 +1,22 @@
+{
+  "name": "office-codex",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pixel office dashboard for Codex sessions.",
+  "packageManager": "pnpm@10.28.1",
+  "engines": {
+    "node": ">=22.21.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @office-codex/daemon --filter @office-codex/web dev",
+    "build": "pnpm -r build",
+    "start": "pnpm --filter @office-codex/cli start",
+    "test": "pnpm -r test",
+    "check": "pnpm -r check && biome check .",
+    "format": "biome format --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "typescript": "^5.8.2"
+  }
+}

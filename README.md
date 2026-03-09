@@ -72,9 +72,43 @@ Launch Codex through the wrapper:
 node --import tsx apps/cli/src/index.ts run -- --full-auto
 ```
 
+Launch a safe live demo session you can watch in the dashboard:
+
+```bash
+pnpm office:demo-live
+```
+
+Customize the demo duration:
+
+```bash
+pnpm office:demo-live -- --seconds 45
+```
+
+Show command help:
+
+```bash
+pnpm office:demo-live -- --help
+node --import tsx apps/cli/src/index.ts help demo-live
+```
+
+Typical manual test flow:
+
+1. Start the dashboard with `pnpm dev` or `pnpm office:dashboard`.
+2. Open the UI at `http://127.0.0.1:5173` in dev or `http://127.0.0.1:3210` in single-port mode.
+3. Run `pnpm office:demo-live`.
+4. Watch the roster and canvas show the session as live, then return to `waiting` or `offline`.
+
+## Commands
+
+- `office-codex --help`: show top-level CLI usage
+- `office-codex dashboard --help`: explain the daemon command
+- `office-codex run --help`: explain the wrapper command
+- `office-codex doctor --help`: explain diagnostics
+- `office-codex demo-live --help`: explain the live demo command
+
 ## Architecture
 
-- `apps/cli`: wrapper commands for `dashboard`, `run`, and `doctor`
+- `apps/cli`: wrapper commands for `dashboard`, `run`, `doctor`, and `demo-live`
 - `apps/daemon`: watches `~/.codex`, infers agent state, exposes local API/SSE
 - `apps/web`: React dashboard that renders the office on a single `<canvas>`
 - `packages/core`: shared types, JSONL parsing, state inference

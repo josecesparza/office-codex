@@ -61,6 +61,20 @@ export interface AgentEvent {
   details: string | null;
 }
 
+export interface DeskAnchor {
+  id: string;
+  x: number;
+  y: number;
+  label: string;
+}
+
+export interface OfficeLayout {
+  tileSize: number;
+  width: number;
+  height: number;
+  desks: DeskAnchor[];
+}
+
 export interface SessionIndexRecord {
   id: string;
   threadName: string;

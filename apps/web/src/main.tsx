@@ -1,14 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 
-function App() {
-  return (
-    <main>
-      <h1>Office Codex</h1>
-      <p>Dashboard bootstrap in progress.</p>
-    </main>
-  );
-}
+import { App } from "./app";
+import "./styles.css";
 
 const rootElement = document.getElementById("root");
 

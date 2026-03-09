@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import pino from "pino";
 
 import { startPassiveCodexAdapter } from "./codex-adapter.js";
@@ -27,10 +29,12 @@ export async function startDaemon(overrides: Partial<DaemonConfig> = {}): Promis
     cursorStore,
     logger,
   });
-  const server = createServer({
+  const webDistDir = fileURLToPath(new URL("../../web/dist", import.meta.url));
+  const server = await createServer({
     logger,
     store,
     codexHome: config.codexHome,
+    webDistDir,
   });
 
   await server.listen({

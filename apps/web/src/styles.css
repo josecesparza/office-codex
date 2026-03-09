@@ -1,0 +1,266 @@
+:root {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: #201a15;
+  background: radial-gradient(circle at top, #fff7ec, #ede4d2 48%, #ddcfb2 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: #201a15;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.shell {
+  display: grid;
+  gap: 24px;
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.topbar,
+.metrics,
+.workspace {
+  display: grid;
+  gap: 20px;
+}
+
+.topbar {
+  align-items: end;
+  grid-template-columns: 1fr auto;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-family: "Menlo", "Monaco", monospace;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.topbar h1,
+.stage-header h2,
+.panel-header h2 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 0.95;
+}
+
+.topbar p,
+.stage-header p,
+.panel-header p,
+.empty-card p {
+  margin: 0;
+  color: #6f6258;
+}
+
+.connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid rgba(32, 26, 21, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  text-transform: capitalize;
+}
+
+.connection-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.connection-ready .connection-dot {
+  background: #16a34a;
+}
+
+.connection-error .connection-dot {
+  background: #dc2626;
+}
+
+.metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metrics article,
+.stage-card,
+.session-card,
+.empty-card {
+  border: 1px solid rgba(32, 26, 21, 0.12);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(10px);
+}
+
+.metrics article {
+  display: grid;
+  gap: 6px;
+  padding: 18px 20px;
+}
+
+.metrics strong {
+  font-size: 28px;
+}
+
+.workspace {
+  align-items: start;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 420px);
+}
+
+.stage-card {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.stage-header,
+.session-card-head,
+.stage-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.stage-meta {
+  color: #6f6258;
+  font-family: "Menlo", "Monaco", monospace;
+  font-size: 13px;
+}
+
+.stage-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 20px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(249, 238, 217, 0.94), rgba(232, 219, 192, 0.96));
+}
+
+.office-canvas {
+  display: block;
+  image-rendering: pixelated;
+  border: 6px solid rgba(32, 26, 21, 0.1);
+  border-radius: 12px;
+}
+
+.session-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.session-list {
+  display: grid;
+  gap: 12px;
+}
+
+.session-card,
+.empty-card {
+  padding: 16px 18px;
+}
+
+.session-card h3,
+.empty-card strong {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.session-card p {
+  margin: 0;
+  color: #6f6258;
+}
+
+.session-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 0;
+}
+
+.session-card dt {
+  margin: 0 0 4px;
+  color: #6f6258;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.session-card dd {
+  margin: 0;
+  font-family: "Menlo", "Monaco", monospace;
+  font-size: 13px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 112px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-family: "Menlo", "Monaco", monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.badge-inactive {
+  background: #efe2c5;
+}
+
+.badge-thinking {
+  background: #dbeafe;
+}
+
+.badge-using_tool {
+  background: #c7f9cc;
+}
+
+.badge-responding {
+  background: #ede9fe;
+}
+
+.badge-waiting_user {
+  background: #fed7aa;
+}
+
+.badge-offline {
+  background: #e5e7eb;
+}
+
+.badge-error {
+  background: #fecaca;
+}
+
+@media (max-width: 1120px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 18px;
+  }
+
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .session-card dl {
+    grid-template-columns: 1fr;
+  }
+}

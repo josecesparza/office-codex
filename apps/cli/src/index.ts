@@ -3,11 +3,10 @@ import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 
-import { execa } from "execa";
-
 import {
   DEFAULT_PORT,
   DEFAULT_WEB_PORT,
+  findLatestStateDb,
   pathExists,
   resolveDaemonConfig,
   startDaemon,
@@ -19,6 +18,7 @@ import {
   stripRunSeparator,
   wantsHelp,
 } from "./command-helpers.js";
+import { runWrappedCodex } from "./wrapped-codex.js";
 
 const HELP = `office-codex
 
@@ -103,6 +103,21 @@ async function resolveCodexBinary(): Promise<string | null> {
   return (await isExecutable(fallback)) ? fallback : null;
 }
 
+async function resolveSqliteBinary(): Promise<string | null> {
+  const pathVariable = process.env.PATH ?? "";
+
+  for (const segment of pathVariable.split(delimiter)) {
+    const candidate = join(segment, "sqlite3");
+
+    if (await isExecutable(candidate)) {
+      return candidate;
+    }
+  }
+
+  const fallback = "/usr/bin/sqlite3";
+  return (await isExecutable(fallback)) ? fallback : null;
+}
+
 async function runDashboard(): Promise<void> {
   const daemon = await startDaemon();
   console.log(`Office Codex daemon running at http://127.0.0.1:${daemon.config.port}`);
@@ -116,12 +131,15 @@ async function runCodex(args: string[]): Promise<void> {
     throw new Error("Unable to resolve the codex binary from PATH or the macOS app bundle");
   }
 
+  const config = resolveDaemonConfig();
   const runArgs = stripRunSeparator(args);
   const effectiveArgs =
     runArgs[0] === "codex" || runArgs[0] === binary ? runArgs.slice(1) : runArgs;
 
-  await execa(binary, effectiveArgs, {
-    stdio: "inherit",
+  await runWrappedCodex({
+    args: effectiveArgs,
+    binary,
+    port: config.port,
   });
 }
 
@@ -154,27 +172,56 @@ async function runDemoLive(args: string[]): Promise<void> {
     throw new Error("Unable to resolve the codex binary from PATH or the macOS app bundle");
   }
 
-  await execa(binary, ["--full-auto", "exec", buildDemoPrompt(options.seconds)], {
-    stdio: "inherit",
+  const config = resolveDaemonConfig();
+
+  await runWrappedCodex({
+    args: ["--full-auto", "exec", buildDemoPrompt(options.seconds)],
+    binary,
+    port: config.port,
   });
 }
 
 async function runDoctor(): Promise<void> {
   const config = resolveDaemonConfig();
   const binary = await resolveCodexBinary();
+  const sqliteBinary = await resolveSqliteBinary();
   const codexHomeExists = await pathExists(config.codexHome);
   const sessionIndexExists = await pathExists(join(config.codexHome, "session_index.jsonl"));
   const sessionsExists = await pathExists(join(config.codexHome, "sessions"));
+  const stateDbPath = codexHomeExists ? await findLatestStateDb(config.codexHome) : null;
+  let dbReader: "better-sqlite3" | "sqlite3" | "unavailable" = "unavailable";
+
+  try {
+    const betterSqlite = await import("better-sqlite3");
+    const Database = betterSqlite.default;
+
+    if (stateDbPath) {
+      const db = new Database(stateDbPath, { readonly: true, fileMustExist: true });
+      db.close();
+    }
+
+    dbReader = "better-sqlite3";
+  } catch {
+    dbReader = sqliteBinary ? "sqlite3" : "unavailable";
+  }
   const output = {
+    bootstrapSeedLimit: config.bootstrapSeedLimit,
+    cursorFlushMs: config.cursorFlushMs,
+    dbReader,
     node: process.version,
     codexBinary: binary,
     codexHome: config.codexHome,
     codexHomeExists,
+    historyCap: config.offlineHistoryCap,
+    idleMs: config.idleMs,
+    sqlite3Binary: sqliteBinary,
     sessionIndexExists,
     sessionsDirExists: sessionsExists,
+    stateDbPath,
     dashboardPort: config.port,
     defaultWebPort: DEFAULT_WEB_PORT,
     home: homedir(),
+    wrapperHintTtlMs: config.wrapperHintTtlMs,
   };
 
   console.log(JSON.stringify(output, null, 2));

@@ -22,12 +22,17 @@ export const AGENT_EVENT_TYPES = [
 
 export type AgentEventType = (typeof AGENT_EVENT_TYPES)[number];
 
+export const WRAPPER_EVENT_TYPES = ["launch", "identified", "exit"] as const;
+
+export type WrapperEventType = (typeof WRAPPER_EVENT_TYPES)[number];
+
 export interface AgentSession {
   sessionId: string;
   source: string;
   title: string;
   cwd: string;
   gitBranch: string | null;
+  tokensUsed: number | null;
   rolloutPath: string;
   startedAt: string;
   updatedAt: string;
@@ -48,6 +53,7 @@ export interface AgentSessionSeed {
   startedAt: string;
   updatedAt?: string;
   gitBranch?: string | null;
+  tokensUsed?: number | null;
   seatId?: string | null;
 }
 
@@ -74,6 +80,40 @@ export interface OfficeLayout {
   height: number;
   desks: DeskAnchor[];
 }
+
+export interface AccountUsageStatus {
+  status: "available" | "unavailable" | "error";
+  remainingLabel?: string;
+  resetsAt?: string;
+  source?: string;
+}
+
+interface WrapperEventBase {
+  argv: string[];
+  cwd: string;
+  pid: number;
+}
+
+export interface WrapperLaunchEvent extends WrapperEventBase {
+  type: "launch";
+  startedAt: string;
+}
+
+export interface WrapperIdentifiedEvent extends WrapperEventBase {
+  type: "identified";
+  sessionId: string;
+  startedAt: string;
+}
+
+export interface WrapperExitEvent {
+  type: "exit";
+  exitedAt: string;
+  exitCode: number | null;
+  pid: number;
+  sessionId?: string;
+}
+
+export type WrapperEvent = WrapperLaunchEvent | WrapperIdentifiedEvent | WrapperExitEvent;
 
 export interface SessionIndexRecord {
   id: string;

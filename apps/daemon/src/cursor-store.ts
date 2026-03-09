@@ -4,20 +4,33 @@ import { dirname } from "node:path";
 export interface FileCursor {
   offset: number;
   remainder: string;
+  ino: number | null;
+  size: number;
+}
+
+export interface CursorStoreDiagnostics {
+  entries: number;
+  path: string;
+  pendingWrite: boolean;
 }
 
 const EMPTY_CURSOR: FileCursor = {
   offset: 0,
   remainder: "",
+  ino: null,
+  size: 0,
 };
 
 export class CursorStore {
   readonly #path: string;
   readonly #cursors = new Map<string, FileCursor>();
+  readonly #flushMs: number;
   #pendingWrite: Promise<void> | null = null;
+  #flushTimer: NodeJS.Timeout | null = null;
 
-  constructor(path: string) {
+  constructor(path: string, flushMs = 500) {
     this.#path = path;
+    this.#flushMs = flushMs;
   }
 
   async load(): Promise<void> {
@@ -26,8 +39,18 @@ export class CursorStore {
       const parsed = JSON.parse(raw) as Record<string, FileCursor>;
 
       for (const [filePath, cursor] of Object.entries(parsed)) {
-        if (typeof cursor?.offset === "number" && typeof cursor?.remainder === "string") {
-          this.#cursors.set(filePath, cursor);
+        if (
+          typeof cursor?.offset === "number" &&
+          typeof cursor?.remainder === "string" &&
+          (typeof cursor?.ino === "number" || cursor?.ino === null || cursor?.ino === undefined) &&
+          (typeof cursor?.size === "number" || cursor?.size === undefined)
+        ) {
+          this.#cursors.set(filePath, {
+            ino: cursor.ino ?? null,
+            offset: cursor.offset,
+            remainder: cursor.remainder,
+            size: cursor.size ?? cursor.offset,
+          });
         }
       }
     } catch {
@@ -41,10 +64,15 @@ export class CursorStore {
 
   set(filePath: string, cursor: FileCursor): void {
     this.#cursors.set(filePath, cursor);
-    void this.persist();
+    this.schedulePersist();
   }
 
   async persist(): Promise<void> {
+    if (this.#flushTimer) {
+      clearTimeout(this.#flushTimer);
+      this.#flushTimer = null;
+    }
+
     if (this.#pendingWrite) {
       return this.#pendingWrite;
     }
@@ -65,5 +93,25 @@ export class CursorStore {
     })();
 
     await this.#pendingWrite;
+  }
+
+  getDiagnostics(): CursorStoreDiagnostics {
+    return {
+      entries: this.#cursors.size,
+      path: this.#path,
+      pendingWrite: this.#pendingWrite !== null || this.#flushTimer !== null,
+    };
+  }
+
+  schedulePersist(): void {
+    if (this.#flushTimer) {
+      clearTimeout(this.#flushTimer);
+    }
+
+    this.#flushTimer = setTimeout(() => {
+      this.#flushTimer = null;
+      void this.persist();
+    }, this.#flushMs);
+    this.#flushTimer.unref();
   }
 }

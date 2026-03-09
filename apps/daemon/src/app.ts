@@ -2,11 +2,18 @@ import { fileURLToPath } from "node:url";
 
 import pino from "pino";
 
-import { startPassiveCodexAdapter } from "./codex-adapter.js";
-import { type DaemonConfig, getCursorStorePath, resolveDaemonConfig } from "./config.js";
+import { readAccountUsageStatus } from "./account-usage.js";
+import { findLatestStateDb, startPassiveCodexAdapter } from "./codex-adapter.js";
+import {
+  type DaemonConfig,
+  getCursorStorePath,
+  pathExists,
+  resolveDaemonConfig,
+} from "./config.js";
 import { CursorStore } from "./cursor-store.js";
 import { createServer } from "./server.js";
 import { SessionStore } from "./session-store.js";
+import { WrapperEventHandler } from "./wrapper-events.js";
 
 export interface StartedDaemon {
   close(): Promise<void>;
@@ -15,13 +22,16 @@ export interface StartedDaemon {
 }
 
 export async function startDaemon(overrides: Partial<DaemonConfig> = {}): Promise<StartedDaemon> {
+  const startedAt = Date.now();
   const config = resolveDaemonConfig(overrides);
   const logger = pino({
     name: "office-codex-daemon",
     level: process.env.LOG_LEVEL ?? "info",
   });
-  const store = new SessionStore();
-  const cursorStore = new CursorStore(getCursorStorePath(config));
+  const store = new SessionStore({
+    offlineHistoryCap: config.offlineHistoryCap,
+  });
+  const cursorStore = new CursorStore(getCursorStorePath(config), config.cursorFlushMs);
   await cursorStore.load();
   const adapter = await startPassiveCodexAdapter({
     config,
@@ -29,12 +39,24 @@ export async function startDaemon(overrides: Partial<DaemonConfig> = {}): Promis
     cursorStore,
     logger,
   });
+  const wrapperEvents = new WrapperEventHandler(store, config.wrapperHintTtlMs);
   const webDistDir = fileURLToPath(new URL("../../web/dist", import.meta.url));
   const server = await createServer({
+    adapter,
+    config,
+    cursorStore,
     logger,
     store,
     codexHome: config.codexHome,
+    getAccountUsage: async () => {
+      const stateDbPath = (await pathExists(config.codexHome))
+        ? await findLatestStateDb(config.codexHome)
+        : null;
+      return readAccountUsageStatus(stateDbPath, logger);
+    },
+    startedAt,
     webDistDir,
+    wrapperEvents,
   });
 
   await server.listen({
@@ -54,4 +76,5 @@ export async function startDaemon(overrides: Partial<DaemonConfig> = {}): Promis
   };
 }
 
+export { findLatestStateDb } from "./codex-adapter.js";
 export { DEFAULT_PORT, DEFAULT_WEB_PORT, pathExists, resolveDaemonConfig } from "./config.js";

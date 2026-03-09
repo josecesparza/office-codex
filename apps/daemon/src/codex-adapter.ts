@@ -1,33 +1,60 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { open, readFile, readdir, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { promisify } from "node:util";
 
-import {
-  parseSessionIndexLine,
-  parseTranscriptLine,
-  parseTranscriptLines,
-} from "@office-codex/core";
+import { parseSessionIndexLine, parseTranscriptLine } from "@office-codex/core";
 import type { ParsedTranscriptEntry } from "@office-codex/core";
+import type { AgentSession } from "@office-codex/core";
 import chokidar from "chokidar";
 import type pino from "pino";
 
 import { type DaemonConfig, pathExists } from "./config.js";
 import type { CursorStore } from "./cursor-store.js";
 import type { SessionSeedPatch, SessionStore } from "./session-store.js";
+import { deriveTitleFromPromptText, looksLikeMachineTitle } from "./session-titles.js";
 
-interface ThreadRecord {
-  id: string;
-  title: string;
+type DbReaderMode = "better-sqlite3" | "sqlite3" | "unavailable";
+
+interface RawThreadRow {
+  created_at: number;
   cwd: string;
-  createdAt: string;
-  updatedAt: string;
+  first_user_message: string | null;
+  git_branch: string | null;
+  id: string;
   source: string;
-  gitBranch: string | null;
+  title: string | null;
+  tokens_used: number | null;
+  updated_at: number;
 }
 
-interface PassiveCodexAdapter {
+interface ThreadRecord {
+  createdAt: string;
+  cwd: string;
+  firstUserMessage: string | null;
+  gitBranch: string | null;
+  id: string;
+  source: string;
+  title: string;
+  tokensUsed: number | null;
+  updatedAt: string;
+}
+
+export interface PassiveCodexAdapterMetrics {
+  bootstrapDurationMs: number;
+  bootstrappedSeeds: number;
+  bootstrappedTranscripts: number;
+  dbReader: DbReaderMode;
+  ingestErrors: number;
+  lastIngestAt: string | null;
+  parseErrors: number;
+  stateDbPath: string | null;
+  watchedRoots: string[];
+}
+
+export interface PassiveCodexAdapter {
   close(): Promise<void>;
+  getMetrics(): PassiveCodexAdapterMetrics;
 }
 
 const execFile = promisify(execFileCallback);
@@ -39,6 +66,48 @@ function toIsoTimestamp(raw: number): string {
 function extractSessionId(filePath: string): string | null {
   const match = filePath.match(/([0-9a-f]{8}-[0-9a-f-]{27})\.jsonl$/i);
   return match?.[1] ?? null;
+}
+
+function sortByUpdatedAtDesc<T extends { updatedAt?: string }>(values: T[]): T[] {
+  return [...values].sort((left, right) =>
+    (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""),
+  );
+}
+
+function resolveThreadTitle(
+  title: string | null,
+  firstUserMessage: string | null,
+  config: DaemonConfig,
+): string {
+  const normalizedTitle = title?.trim() ?? "";
+
+  if (normalizedTitle && !looksLikeMachineTitle(normalizedTitle)) {
+    return normalizedTitle;
+  }
+
+  if (config.titleHydrationMode === "first_user_message") {
+    const hydratedTitle = deriveTitleFromPromptText(firstUserMessage);
+
+    if (hydratedTitle) {
+      return hydratedTitle;
+    }
+  }
+
+  return normalizedTitle;
+}
+
+function mapThreadRow(row: RawThreadRow, config: DaemonConfig): ThreadRecord {
+  return {
+    createdAt: toIsoTimestamp(row.created_at),
+    cwd: row.cwd,
+    firstUserMessage: row.first_user_message,
+    gitBranch: row.git_branch,
+    id: row.id,
+    source: row.source,
+    title: resolveThreadTitle(row.title, row.first_user_message, config),
+    tokensUsed: row.tokens_used,
+    updatedAt: toIsoTimestamp(row.updated_at),
+  };
 }
 
 async function recursiveFiles(root: string): Promise<string[]> {
@@ -61,46 +130,54 @@ async function recursiveFiles(root: string): Promise<string[]> {
   return results;
 }
 
-async function readThreadRecords(
+async function queryThreadsWithBetterSqlite(
   stateDbPath: string,
-  logger: pino.Logger,
-): Promise<ThreadRecord[]> {
-  try {
-    const betterSqlite = await import("better-sqlite3");
-    const Database = betterSqlite.default;
-    const db = new Database(stateDbPath, { readonly: true, fileMustExist: true });
-    const statement = db.prepare(`
-      select
-        id,
-        title,
-        cwd,
-        created_at,
-        updated_at,
-        source,
-        git_branch
-      from threads
-      order by updated_at desc
-    `);
-    const rows = statement.all() as Array<{
-      id: string;
-      title: string;
-      cwd: string;
-      created_at: number;
-      updated_at: number;
-      source: string;
-      git_branch: string | null;
-    }>;
-    db.close();
+  query: string,
+  args: readonly string[],
+): Promise<RawThreadRow[]> {
+  const betterSqlite = await import("better-sqlite3");
+  const Database = betterSqlite.default;
+  const db = new Database(stateDbPath, { readonly: true, fileMustExist: true });
 
-    return rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      cwd: row.cwd,
-      createdAt: toIsoTimestamp(row.created_at),
-      updatedAt: toIsoTimestamp(row.updated_at),
-      source: row.source,
-      gitBranch: row.git_branch,
-    }));
+  try {
+    const statement = db.prepare(query);
+    return statement.all(...args) as RawThreadRow[];
+  } finally {
+    db.close();
+  }
+}
+
+async function queryThreadsWithSqlite3(
+  stateDbPath: string,
+  query: string,
+  args: readonly string[],
+): Promise<RawThreadRow[]> {
+  let effectiveQuery = query;
+
+  if (args.length > 0) {
+    const [sessionId] = args;
+
+    if (sessionId) {
+      const escaped = sessionId.replaceAll("'", "''");
+      effectiveQuery = query.replace("?", `'${escaped}'`);
+    }
+  }
+
+  const { stdout } = await execFile("sqlite3", ["-json", stateDbPath, effectiveQuery]);
+  return stdout.trim() ? (JSON.parse(stdout) as RawThreadRow[]) : [];
+}
+
+async function readThreadRows(
+  stateDbPath: string,
+  query: string,
+  args: readonly string[],
+  logger: pino.Logger,
+): Promise<{ reader: DbReaderMode; rows: RawThreadRow[] }> {
+  try {
+    return {
+      reader: "better-sqlite3",
+      rows: await queryThreadsWithBetterSqlite(stateDbPath, query, args),
+    };
   } catch (error) {
     logger.warn(
       { err: error, stateDbPath },
@@ -109,45 +186,74 @@ async function readThreadRecords(
   }
 
   try {
-    const query = `
-      select
-        id,
-        title,
-        cwd,
-        created_at,
-        updated_at,
-        source,
-        git_branch
-      from threads
-      order by updated_at desc;
-    `;
-    const { stdout } = await execFile("sqlite3", ["-json", stateDbPath, query]);
-    const rows = JSON.parse(stdout) as Array<{
-      id: string;
-      title: string;
-      cwd: string;
-      created_at: number;
-      updated_at: number;
-      source: string;
-      git_branch: string | null;
-    }>;
-
-    return rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      cwd: row.cwd,
-      createdAt: toIsoTimestamp(row.created_at),
-      updatedAt: toIsoTimestamp(row.updated_at),
-      source: row.source,
-      gitBranch: row.git_branch,
-    }));
+    return {
+      reader: "sqlite3",
+      rows: await queryThreadsWithSqlite3(stateDbPath, query, args),
+    };
   } catch (error) {
     logger.warn({ err: error, stateDbPath }, "Unable to read Codex threads database via sqlite3");
-    return [];
+    return {
+      reader: "unavailable",
+      rows: [],
+    };
   }
 }
 
-async function findLatestStateDb(codexHome: string): Promise<string | null> {
+async function readThreadRecords(
+  stateDbPath: string,
+  config: DaemonConfig,
+  logger: pino.Logger,
+): Promise<{ reader: DbReaderMode; rows: ThreadRecord[] }> {
+  const query = `
+    select
+      id,
+      title,
+      first_user_message,
+      cwd,
+      created_at,
+      updated_at,
+      source,
+      git_branch,
+      tokens_used
+    from threads
+    order by updated_at desc
+    limit ${config.bootstrapSeedLimit};
+  `;
+  const result = await readThreadRows(stateDbPath, query, [], logger);
+
+  return {
+    reader: result.reader,
+    rows: result.rows.map((row) => mapThreadRow(row, config)),
+  };
+}
+
+async function readThreadRecordById(
+  stateDbPath: string,
+  config: DaemonConfig,
+  sessionId: string,
+  logger: pino.Logger,
+): Promise<ThreadRecord | null> {
+  const query = `
+    select
+      id,
+      title,
+      first_user_message,
+      cwd,
+      created_at,
+      updated_at,
+      source,
+      git_branch,
+      tokens_used
+    from threads
+    where id = ?
+    limit 1;
+  `;
+  const result = await readThreadRows(stateDbPath, query, [sessionId], logger);
+  const row = result.rows[0];
+  return row ? mapThreadRow(row, config) : null;
+}
+
+export async function findLatestStateDb(codexHome: string): Promise<string | null> {
   const entries = await readdir(codexHome, { withFileTypes: true });
   const candidates = entries
     .filter((entry) => entry.isFile() && /^state_.*\.sqlite$/.test(entry.name))
@@ -169,22 +275,41 @@ async function findLatestStateDb(codexHome: string): Promise<string | null> {
 }
 
 async function readNewLines(filePath: string, cursorStore: CursorStore): Promise<string[]> {
-  const buffer = await readFile(filePath);
-  const previous = cursorStore.get(filePath);
-  const safeOffset = buffer.length < previous.offset ? 0 : previous.offset;
-  const chunk = buffer.subarray(safeOffset).toString("utf8");
-  const combined = previous.remainder + chunk;
-  const hasTrailingNewline = combined.endsWith("\n");
-  const pieces = combined.split("\n");
-  const remainder = hasTrailingNewline ? "" : (pieces.pop() ?? "");
-  const nextOffset = buffer.length - Buffer.byteLength(remainder);
+  const handle = await open(filePath, "r");
 
-  cursorStore.set(filePath, {
-    offset: nextOffset,
-    remainder,
-  });
+  try {
+    const fileStats = await handle.stat();
+    const previous = cursorStore.get(filePath);
+    const fileIno = typeof fileStats.ino === "number" ? fileStats.ino : null;
+    const didRotate = previous.ino !== null && fileIno !== null && previous.ino !== fileIno;
+    const didTruncate = fileStats.size < previous.offset;
+    const cursor =
+      didRotate || didTruncate ? { ino: fileIno, offset: 0, remainder: "", size: 0 } : previous;
+    const bytesToRead = Math.max(0, fileStats.size - cursor.offset);
+    let chunk = "";
 
-  return pieces.map((piece) => piece.trim()).filter((piece) => piece.length > 0);
+    if (bytesToRead > 0) {
+      const buffer = Buffer.alloc(bytesToRead);
+      await handle.read(buffer, 0, bytesToRead, cursor.offset);
+      chunk = buffer.toString("utf8");
+    }
+
+    const combined = cursor.remainder + chunk;
+    const hasTrailingNewline = combined.endsWith("\n");
+    const pieces = combined.split("\n");
+    const remainder = hasTrailingNewline ? "" : (pieces.pop() ?? "");
+
+    cursorStore.set(filePath, {
+      ino: fileIno,
+      offset: fileStats.size,
+      remainder,
+      size: fileStats.size,
+    });
+
+    return pieces.map((piece) => piece.trim()).filter((piece) => piece.length > 0);
+  } finally {
+    await handle.close();
+  }
 }
 
 function seedFromEntry(
@@ -194,74 +319,162 @@ function seedFromEntry(
 ): SessionSeedPatch {
   if (entry.kind !== "session_meta") {
     return {
-      sessionId,
       rolloutPath: filePath,
+      sessionId,
       updatedAt: entry.timestamp,
     };
   }
 
   return {
-    sessionId,
-    source: entry.source,
     cwd: entry.cwd,
     rolloutPath: filePath,
+    sessionId,
+    source: entry.source,
     startedAt: entry.timestamp,
     updatedAt: entry.timestamp,
   };
 }
 
-async function ingestExistingTranscript(
-  filePath: string,
-  store: SessionStore,
-  cursorStore: CursorStore,
-): Promise<void> {
-  const sessionId = extractSessionId(filePath);
+function markSuccessfulIngest(metrics: PassiveCodexAdapterMetrics, timestamp: string): void {
+  metrics.lastIngestAt = timestamp;
+}
+
+async function ingestTranscriptContents(options: {
+  config: DaemonConfig;
+  contents: string;
+  filePath: string;
+  logger: pino.Logger;
+  metrics: PassiveCodexAdapterMetrics;
+  sessionId: string;
+  stateDbPath: string | null;
+  store: SessionStore;
+}): Promise<void> {
+  const lines = options.contents
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  for (const line of lines) {
+    const parsed = parseTranscriptLine(line);
+
+    if (!parsed) {
+      options.metrics.parseErrors += 1;
+      continue;
+    }
+
+    options.store.applyEntry(
+      options.sessionId,
+      parsed,
+      seedFromEntry(options.sessionId, options.filePath, parsed),
+    );
+    markSuccessfulIngest(options.metrics, parsed.timestamp);
+  }
+
+  if (!options.stateDbPath) {
+    return;
+  }
+
+  const thread = await readThreadRecordById(
+    options.stateDbPath,
+    options.config,
+    options.sessionId,
+    options.logger,
+  );
+
+  if (!thread) {
+    return;
+  }
+
+  options.store.upsertSeed({
+    cwd: thread.cwd,
+    gitBranch: thread.gitBranch,
+    sessionId: thread.id,
+    source: thread.source,
+    startedAt: thread.createdAt,
+    title: thread.title,
+    tokensUsed: thread.tokensUsed,
+    updatedAt: thread.updatedAt,
+  });
+}
+
+async function ingestExistingTranscript(options: {
+  config: DaemonConfig;
+  cursorStore: CursorStore;
+  filePath: string;
+  logger: pino.Logger;
+  metrics: PassiveCodexAdapterMetrics;
+  stateDbPath: string | null;
+  store: SessionStore;
+}): Promise<void> {
+  const sessionId = extractSessionId(options.filePath);
 
   if (!sessionId) {
     return;
   }
 
-  const contents = await readFile(filePath, "utf8");
-  const entries = parseTranscriptLines(contents);
+  const [contents, fileStats] = await Promise.all([
+    readFile(options.filePath, "utf8"),
+    stat(options.filePath),
+  ]);
 
-  for (const entry of entries) {
-    store.applyEntry(sessionId, entry, seedFromEntry(sessionId, filePath, entry));
-  }
+  await ingestTranscriptContents({
+    config: options.config,
+    contents,
+    filePath: options.filePath,
+    logger: options.logger,
+    metrics: options.metrics,
+    sessionId,
+    stateDbPath: options.stateDbPath,
+    store: options.store,
+  });
 
-  cursorStore.set(filePath, {
-    offset: Buffer.byteLength(contents),
+  options.cursorStore.set(options.filePath, {
+    ino: typeof fileStats.ino === "number" ? fileStats.ino : null,
+    offset: fileStats.size,
     remainder: "",
+    size: fileStats.size,
   });
 }
 
-async function readSessionIndexBootstrap(sessionIndexPath: string): Promise<SessionSeedPatch[]> {
+async function readSessionIndexBootstrap(
+  sessionIndexPath: string,
+  limit: number,
+  metrics: PassiveCodexAdapterMetrics,
+): Promise<SessionSeedPatch[]> {
   const contents = await readFile(sessionIndexPath, "utf8");
+  const seeds: SessionSeedPatch[] = [];
 
-  return contents
+  for (const line of contents
     .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .flatMap((line) => {
-      const parsed = parseSessionIndexLine(line);
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)) {
+    const parsed = parseSessionIndexLine(line);
 
-      if (!parsed) {
-        return [];
-      }
+    if (!parsed) {
+      metrics.parseErrors += 1;
+      continue;
+    }
 
-      return [
-        {
-          sessionId: parsed.id,
-          title: parsed.threadName,
-          updatedAt: parsed.updatedAt,
-        },
-      ];
-    });
+    const patch: SessionSeedPatch = {
+      sessionId: parsed.id,
+      updatedAt: parsed.updatedAt,
+    };
+
+    if (!looksLikeMachineTitle(parsed.threadName)) {
+      patch.title = parsed.threadName;
+    }
+
+    seeds.push(patch);
+  }
+
+  return sortByUpdatedAtDesc(seeds).slice(0, limit);
 }
 
 async function handleChangedSessionIndex(
   filePath: string,
   store: SessionStore,
   cursorStore: CursorStore,
+  metrics: PassiveCodexAdapterMetrics,
 ): Promise<void> {
   const lines = await readNewLines(filePath, cursorStore);
 
@@ -269,105 +482,219 @@ async function handleChangedSessionIndex(
     const parsed = parseSessionIndexLine(line);
 
     if (!parsed) {
+      metrics.parseErrors += 1;
       continue;
     }
 
-    store.upsertSeed({
+    const patch: SessionSeedPatch = {
       sessionId: parsed.id,
-      title: parsed.threadName,
       updatedAt: parsed.updatedAt,
-    });
+    };
+
+    if (!looksLikeMachineTitle(parsed.threadName)) {
+      patch.title = parsed.threadName;
+    }
+
+    store.upsertSeed(patch);
+    markSuccessfulIngest(metrics, parsed.updatedAt);
   }
 }
 
-async function handleChangedTranscript(
-  filePath: string,
-  store: SessionStore,
-  cursorStore: CursorStore,
-): Promise<void> {
-  const sessionId = extractSessionId(filePath);
+async function handleChangedTranscript(options: {
+  config: DaemonConfig;
+  cursorStore: CursorStore;
+  filePath: string;
+  logger: pino.Logger;
+  metrics: PassiveCodexAdapterMetrics;
+  stateDbPath: string | null;
+  store: SessionStore;
+}): Promise<void> {
+  const sessionId = extractSessionId(options.filePath);
 
   if (!sessionId) {
     return;
   }
 
-  const lines = await readNewLines(filePath, cursorStore);
+  const lines = await readNewLines(options.filePath, options.cursorStore);
 
-  for (const line of lines) {
-    const parsed = parseTranscriptLine(line);
+  if (lines.length === 0) {
+    return;
+  }
 
-    if (!parsed) {
+  await ingestTranscriptContents({
+    config: options.config,
+    contents: `${lines.join("\n")}\n`,
+    filePath: options.filePath,
+    logger: options.logger,
+    metrics: options.metrics,
+    sessionId,
+    stateDbPath: options.stateDbPath,
+    store: options.store,
+  });
+}
+
+function buildBootstrapTranscriptTargetIds(
+  sessions: AgentSession[],
+  now: number,
+  config: DaemonConfig,
+): Set<string> {
+  const targetIds = new Set<string>();
+  const sortedSessions = sortByUpdatedAtDesc(sessions);
+  const recentThreshold = now - config.idleMs;
+
+  for (const session of sortedSessions) {
+    const updatedAt = Date.parse(session.updatedAt);
+
+    if (Number.isFinite(updatedAt) && updatedAt >= recentThreshold) {
+      targetIds.add(session.sessionId);
+    }
+  }
+
+  for (const session of sortedSessions.slice(0, config.offlineHistoryCap)) {
+    targetIds.add(session.sessionId);
+  }
+
+  return targetIds;
+}
+
+function markHistoricalSeedsOffline(store: SessionStore, now: number, idleMs: number): void {
+  for (const session of store.list()) {
+    const updatedAt = Date.parse(session.updatedAt);
+
+    if (!Number.isFinite(updatedAt) || updatedAt >= now - idleMs) {
       continue;
     }
 
-    store.applyEntry(sessionId, parsed, seedFromEntry(sessionId, filePath, parsed));
+    store.markOffline(session.sessionId, session.updatedAt, {
+      details: "bootstrap_seed",
+      preserveUpdatedAt: true,
+    });
   }
 }
 
 export async function startPassiveCodexAdapter(options: {
   config: DaemonConfig;
-  store: SessionStore;
   cursorStore: CursorStore;
   logger: pino.Logger;
+  store: SessionStore;
 }): Promise<PassiveCodexAdapter> {
   const { config, cursorStore, logger, store } = options;
   const sessionIndexPath = join(config.codexHome, "session_index.jsonl");
   const sessionsRoot = join(config.codexHome, "sessions");
+  const watchedRoots = [sessionIndexPath, sessionsRoot];
+  const metrics: PassiveCodexAdapterMetrics = {
+    bootstrapDurationMs: 0,
+    bootstrappedSeeds: 0,
+    bootstrappedTranscripts: 0,
+    dbReader: "unavailable",
+    ingestErrors: 0,
+    lastIngestAt: null,
+    parseErrors: 0,
+    stateDbPath: null,
+    watchedRoots,
+  };
+  const bootstrapSeedIds = new Set<string>();
+  const bootstrapStartedAt = Date.now();
   const latestStateDb = (await pathExists(config.codexHome))
     ? await findLatestStateDb(config.codexHome)
     : null;
 
-  if (latestStateDb) {
-    const threads = await readThreadRecords(latestStateDb, logger);
+  metrics.stateDbPath = latestStateDb;
 
-    for (const thread of threads) {
+  if (latestStateDb) {
+    const threads = await readThreadRecords(latestStateDb, config, logger);
+    metrics.dbReader = threads.reader;
+
+    for (const thread of threads.rows) {
       store.upsertSeed({
-        sessionId: thread.id,
-        title: thread.title,
         cwd: thread.cwd,
+        gitBranch: thread.gitBranch,
+        sessionId: thread.id,
         source: thread.source,
         startedAt: thread.createdAt,
+        title: thread.title,
+        tokensUsed: thread.tokensUsed,
         updatedAt: thread.updatedAt,
-        gitBranch: thread.gitBranch,
       });
+      bootstrapSeedIds.add(thread.id);
     }
   }
 
   if (await pathExists(sessionIndexPath)) {
-    for (const seed of await readSessionIndexBootstrap(sessionIndexPath)) {
+    for (const seed of await readSessionIndexBootstrap(
+      sessionIndexPath,
+      config.bootstrapSeedLimit,
+      metrics,
+    )) {
       store.upsertSeed(seed);
+      bootstrapSeedIds.add(seed.sessionId);
     }
   }
+
+  metrics.bootstrappedSeeds = bootstrapSeedIds.size;
+  markHistoricalSeedsOffline(store, Date.now(), config.idleMs);
 
   if (await pathExists(sessionsRoot)) {
-    const files = (await recursiveFiles(sessionsRoot)).filter(
-      (filePath) => extname(filePath) === ".jsonl",
-    );
+    const bootstrapTargetIds = buildBootstrapTranscriptTargetIds(store.list(), Date.now(), config);
+    const files = (await recursiveFiles(sessionsRoot))
+      .filter((filePath) => extname(filePath) === ".jsonl")
+      .sort();
 
     for (const filePath of files) {
-      await ingestExistingTranscript(filePath, store, cursorStore);
+      const sessionId = extractSessionId(filePath);
+
+      if (!sessionId || !bootstrapTargetIds.has(sessionId)) {
+        continue;
+      }
+
+      try {
+        await ingestExistingTranscript({
+          config,
+          cursorStore,
+          filePath,
+          logger,
+          metrics,
+          stateDbPath: latestStateDb,
+          store,
+        });
+        metrics.bootstrappedTranscripts += 1;
+      } catch (error) {
+        metrics.ingestErrors += 1;
+        logger.warn({ err: error, filePath }, "Unable to bootstrap Codex transcript");
+      }
     }
   }
 
-  const watcher = chokidar.watch([sessionIndexPath, sessionsRoot], {
-    ignoreInitial: true,
+  metrics.bootstrapDurationMs = Date.now() - bootstrapStartedAt;
+
+  const watcher = chokidar.watch(watchedRoots, {
     awaitWriteFinish: {
-      stabilityThreshold: 200,
       pollInterval: 50,
+      stabilityThreshold: 200,
     },
+    ignoreInitial: true,
   });
 
   const onFileChange = async (filePath: string): Promise<void> => {
     try {
       if (filePath === sessionIndexPath) {
-        await handleChangedSessionIndex(filePath, store, cursorStore);
+        await handleChangedSessionIndex(filePath, store, cursorStore, metrics);
         return;
       }
 
       if (filePath.startsWith(sessionsRoot) && extname(filePath) === ".jsonl") {
-        await handleChangedTranscript(filePath, store, cursorStore);
+        await handleChangedTranscript({
+          config,
+          cursorStore,
+          filePath,
+          logger,
+          metrics,
+          stateDbPath: latestStateDb,
+          store,
+        });
       }
     } catch (error) {
+      metrics.ingestErrors += 1;
       logger.warn({ err: error, filePath }, "Unable to ingest Codex transcript update");
     }
   };
@@ -385,6 +712,11 @@ export async function startPassiveCodexAdapter(options: {
       clearInterval(idleTimer);
       await watcher.close();
       await cursorStore.persist();
+    },
+    getMetrics() {
+      return {
+        ...metrics,
+      };
     },
   };
 }

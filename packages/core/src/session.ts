@@ -9,6 +9,7 @@ export function createAgentSession(seed: AgentSessionSeed): AgentSession {
     title: seed.title,
     cwd: seed.cwd,
     gitBranch: seed.gitBranch ?? null,
+    tokensUsed: seed.tokensUsed ?? null,
     rolloutPath: seed.rolloutPath,
     startedAt: seed.startedAt,
     updatedAt,

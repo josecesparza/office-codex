@@ -106,6 +106,30 @@ function drawBadge(ctx: CanvasRenderingContext2D, x: number, y: number, color: s
   ctx.fillRect(x + 2, y + 2, 4, 4);
 }
 
+function drawHoveredAgentAccent(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.fillStyle = "#fff7c2";
+  ctx.fillRect(x + 1, y + 1, 10, 1);
+  ctx.fillRect(x + 1, y + 10, 10, 1);
+  ctx.fillRect(x + 1, y + 2, 1, 8);
+  ctx.fillRect(x + 10, y + 2, 1, 8);
+
+  ctx.fillRect(x - 1, y + 7, 14, 1);
+  ctx.fillRect(x - 1, y + 20, 14, 1);
+  ctx.fillRect(x - 1, y + 8, 1, 12);
+  ctx.fillRect(x + 12, y + 8, 1, 12);
+
+  ctx.fillStyle = officePalette.accent;
+  ctx.fillRect(x - 3, y + 3, 2, 2);
+  ctx.fillRect(x + 13, y + 3, 2, 2);
+  ctx.fillRect(x - 3, y + 17, 2, 2);
+  ctx.fillRect(x + 13, y + 17, 2, 2);
+
+  ctx.fillStyle = "#fff3a8";
+  ctx.fillRect(x - 4, y + 22, 20, 3);
+  ctx.fillStyle = officePalette.accent;
+  ctx.fillRect(x - 2, y + 23, 16, 1);
+}
+
 function drawAgent(
   ctx: CanvasRenderingContext2D,
   slot: AgentSlot,
@@ -124,10 +148,7 @@ function drawAgent(
   ctx.globalAlpha = options.hasHoveredSession && !options.isHovered ? baseAlpha * 0.52 : baseAlpha;
 
   if (options.isHovered) {
-    ctx.fillStyle = "#fff7c2";
-    ctx.fillRect(x - 4, y - 4, 20, 28);
-    ctx.fillStyle = officePalette.accent;
-    ctx.fillRect(x - 2, y - 2, 16, 24);
+    drawHoveredAgentAccent(ctx, x, y);
   }
 
   ctx.fillStyle = color;
@@ -174,12 +195,6 @@ function drawAgent(
     ctx.strokeStyle = officePalette.wall;
     ctx.lineWidth = 1;
     ctx.strokeRect(x - 4, y + 20, 20, 4);
-  }
-
-  if (options.isHovered) {
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x - 3, y - 3, 18, 26);
   }
 
   ctx.restore();

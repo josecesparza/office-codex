@@ -127,12 +127,12 @@ describe("createServer", () => {
     });
 
     expect(liveResponse.statusCode).toBe(200);
-    expect(liveResponse.json().sessions.map((session: { sessionId: string }) => session.sessionId)).toEqual([
-      "live-session",
-    ]);
-    expect(historyResponse.json().sessions.map((session: { sessionId: string }) => session.sessionId)).toEqual([
-      "offline-2",
-    ]);
+    expect(
+      liveResponse.json().sessions.map((session: { sessionId: string }) => session.sessionId),
+    ).toEqual(["live-session"]);
+    expect(
+      historyResponse.json().sessions.map((session: { sessionId: string }) => session.sessionId),
+    ).toEqual(["offline-2"]);
     expect(historyResponse.json().meta.hasMoreHistory).toBe(true);
     expect(healthResponse.json().sessions).toMatchObject({
       live: 1,

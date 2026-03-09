@@ -1,8 +1,10 @@
 import { execFile as execFileCallback } from "node:child_process";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_DEMO_SECONDS,
@@ -10,6 +12,11 @@ import {
   parseDemoLiveArgs,
   stripRunSeparator,
 } from "../src/command-helpers.js";
+import {
+  detectSessionId,
+  inferCodexWorkingDirectory,
+  runWrappedCodex,
+} from "../src/wrapped-codex.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -42,6 +49,18 @@ describe("parseCommand", () => {
       seconds: DEFAULT_DEMO_SECONDS,
     });
   });
+
+  it("detects the session id from Codex output", () => {
+    expect(detectSessionId("session id: 019cd46b-7904-71a2-a937-d8ad8d389000")).toBe(
+      "019cd46b-7904-71a2-a937-d8ad8d389000",
+    );
+    expect(detectSessionId("no session here")).toBeNull();
+  });
+
+  it("infers the working directory from -C and --cd", () => {
+    expect(inferCodexWorkingDirectory(["-C", "demo"], "/tmp/root")).toBe("/tmp/root/demo");
+    expect(inferCodexWorkingDirectory(["--cd=/tmp/other"], "/tmp/root")).toBe("/tmp/other");
+  });
 });
 
 describe("office-codex doctor", () => {
@@ -61,16 +80,28 @@ describe("office-codex doctor", () => {
     );
 
     const payload = JSON.parse(stdout) as {
+      bootstrapSeedLimit: number;
       codexHome: string;
       codexHomeExists: boolean;
+      cursorFlushMs: number;
+      dbReader: string;
+      historyCap: number;
+      idleMs: number;
       sessionsDirExists: boolean;
       sessionIndexExists: boolean;
+      wrapperHintTtlMs: number;
     };
 
+    expect(payload.bootstrapSeedLimit).toBe(500);
     expect(payload.codexHome).toBe(fixtureHome);
     expect(payload.codexHomeExists).toBe(true);
+    expect(payload.cursorFlushMs).toBe(500);
+    expect(payload.dbReader).toMatch(/better-sqlite3|sqlite3|unavailable/);
+    expect(payload.historyCap).toBe(200);
+    expect(payload.idleMs).toBe(120000);
     expect(payload.sessionIndexExists).toBe(true);
     expect(payload.sessionsDirExists).toBe(true);
+    expect(payload.wrapperHintTtlMs).toBe(120000);
   });
 });
 
@@ -88,4 +119,53 @@ describe("office-codex help", () => {
     expect(stdout).toContain("office-codex demo-live [options]");
     expect(stdout).toContain("--seconds <n>");
   });
+});
+
+describe("office-codex run", () => {
+  it("posts wrapper lifecycle events while streaming Codex output", async () => {
+    const repoRoot = resolve(import.meta.dirname, "../../..");
+    const binDir = await mkdtemp(resolve(tmpdir(), "office-codex-cli-bin-"));
+    const fakeCodexPath = resolve(binDir, "codex");
+    const events: Array<Record<string, unknown>> = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (typeof init?.body === "string") {
+          events.push(JSON.parse(init.body) as Record<string, unknown>);
+        }
+
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 202,
+        });
+      }),
+    );
+
+    await writeFile(
+      fakeCodexPath,
+      [
+        "#!/bin/sh",
+        'echo "OpenAI Codex test build"',
+        'echo "session id: 019cd46b-7904-71a2-a937-d8ad8d389000"',
+        'echo "done"',
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(fakeCodexPath, 0o755);
+
+    await runWrappedCodex({
+      args: ["exec", "fake"],
+      binary: fakeCodexPath,
+      cwd: repoRoot,
+      port: 3310,
+    });
+
+    expect(events.map((event) => event.type)).toEqual(["launch", "identified", "exit"]);
+    expect(events[0]?.cwd).toBe(repoRoot);
+    expect(events[1]?.sessionId).toBe("019cd46b-7904-71a2-a937-d8ad8d389000");
+    expect(events[2]?.exitCode).toBe(0);
+  });
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
 });

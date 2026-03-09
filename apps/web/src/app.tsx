@@ -81,7 +81,7 @@ function looksLikeMachineTitle(title: string, sessionId: string): boolean {
   return /^[0-9a-f]{8,}-[0-9a-f-]{8,}$/i.test(title);
 }
 
-function getSessionIdentity(session: {
+function getTooltipIdentity(session: {
   cwd: string;
   sessionId: string;
   title: string;
@@ -99,6 +99,42 @@ function getSessionIdentity(session: {
   return {
     primary: session.title,
     secondary: `${repoName} · ${shortId}`,
+  };
+}
+
+function getRosterIdentity(
+  session: {
+    cwd: string;
+    gitBranch: string | null;
+    sessionId: string;
+    title: string;
+  },
+  options: {
+    deskBadge?: string;
+    offline?: boolean;
+  } = {},
+) {
+  const repoName = basename(session.cwd);
+  const shortId = shortenIdentifier(session.sessionId, 8, 4);
+  const branch = session.gitBranch?.trim() || null;
+
+  if (!looksLikeMachineTitle(session.title, session.sessionId)) {
+    return {
+      primary: session.title,
+      secondary: branch ? `${repoName} · ${branch}` : `${repoName} · Session ${shortId}`,
+    };
+  }
+
+  if (options.offline) {
+    return {
+      primary: `${repoName} / ${shortId}`,
+      secondary: branch ? branch : "Session without branch metadata",
+    };
+  }
+
+  return {
+    primary: `${repoName} / ${options.deskBadge ?? shortId}`,
+    secondary: branch ? `${branch} · Session ${shortId}` : `Session ${shortId}`,
   };
 }
 
@@ -231,7 +267,7 @@ export function App() {
   const tooltipGeometry = hoveredSessionId ? sessionGeometries[hoveredSessionId] : null;
   const tooltipTarget =
     hoveredOfficeSession?.session.state === "offline" ? null : hoveredOfficeSession;
-  const tooltipIdentity = tooltipTarget ? getSessionIdentity(tooltipTarget.session) : null;
+  const tooltipIdentity = tooltipTarget ? getTooltipIdentity(tooltipTarget.session) : null;
 
   useLayoutEffect(() => {
     const workspace = workspaceRef.current;
@@ -462,7 +498,7 @@ export function App() {
                 const { accentColor, deskBadge, isBlocked, session, variant } = renderSession;
                 const isSelected = selectedSessionId === session.sessionId;
                 const isLinked = !selectedSessionId && linkedSessionId === session.sessionId;
-                const sessionIdentity = getSessionIdentity(session);
+                const sessionIdentity = getRosterIdentity(session, { deskBadge });
 
                 return (
                   <div
@@ -543,7 +579,7 @@ export function App() {
               <div className="session-list">
                 {visibleOfflineSessions.map((session) => {
                   const accentColor = getSessionAccent(session.sessionId);
-                  const sessionIdentity = getSessionIdentity(session);
+                  const sessionIdentity = getRosterIdentity(session, { offline: true });
 
                   return (
                     <article

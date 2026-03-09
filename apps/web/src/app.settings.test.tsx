@@ -266,6 +266,7 @@ describe("app settings", () => {
     expect(screen.getByTestId("office-tooltip").textContent).toContain("Tool");
 
     await user.click(screen.getByRole("button", { name: /open settings/i }));
+    expect(screen.getByRole("combobox", { name: /tooltip detail level/i })).toBeTruthy();
     await user.click(screen.getByRole("combobox", { name: /tooltip detail level/i }));
     await user.click(screen.getByText("Minimal tooltip"));
 
@@ -276,6 +277,7 @@ describe("app settings", () => {
 
     await user.click(screen.getByRole("button", { name: /open settings/i }));
     await user.click(screen.getByRole("switch", { name: /show office tooltips/i }));
+    expect(screen.queryByRole("combobox", { name: /tooltip detail level/i })).toBeNull();
     expect(container.querySelector(".office-tooltip")).toBeNull();
 
     await user.click(screen.getByRole("switch", { name: /reduced motion/i }));

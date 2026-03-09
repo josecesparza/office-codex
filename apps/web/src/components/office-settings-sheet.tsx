@@ -198,28 +198,52 @@ export function OfficeSettingsSheet(props: OfficeSettingsSheetProps) {
 
             <Separator />
 
-            <div className="grid gap-2">
-              <Label htmlFor="tooltip-detail-level">Tooltip detail level</Label>
-              <Select
-                onValueChange={(value) =>
+            <div className="flex items-center justify-between gap-4">
+              <div className="grid gap-1">
+                <Label htmlFor="show-office-tooltips">Show office tooltips</Label>
+                <p className="text-sm text-[#6f6258]">
+                  Enable hover tooltips above agents in the office scene.
+                </p>
+              </div>
+              <Switch
+                checked={props.settings.showOfficeTooltips}
+                id="show-office-tooltips"
+                onCheckedChange={(checked) =>
                   props.onSettingsChange({
-                    tooltipDetailLevel: value as OfficeUiSettings["tooltipDetailLevel"],
+                    showOfficeTooltips: checked,
                   })
                 }
-                value={props.settings.tooltipDetailLevel}
-              >
-                <SelectTrigger aria-label="Tooltip detail level" id="tooltip-detail-level">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TOOLTIP_DETAIL_LEVEL_OPTIONS.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option === "minimal" ? "Minimal tooltip" : "Full tooltip"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             </div>
+
+            {props.settings.showOfficeTooltips ? (
+              <>
+                <Separator />
+
+                <div className="grid gap-2">
+                  <Label htmlFor="tooltip-detail-level">Tooltip detail level</Label>
+                  <Select
+                    onValueChange={(value) =>
+                      props.onSettingsChange({
+                        tooltipDetailLevel: value as OfficeUiSettings["tooltipDetailLevel"],
+                      })
+                    }
+                    value={props.settings.tooltipDetailLevel}
+                  >
+                    <SelectTrigger aria-label="Tooltip detail level" id="tooltip-detail-level">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TOOLTIP_DETAIL_LEVEL_OPTIONS.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option === "minimal" ? "Minimal tooltip" : "Full tooltip"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            ) : null}
 
             <Separator />
 
@@ -241,25 +265,6 @@ export function OfficeSettingsSheet(props: OfficeSettingsSheetProps) {
               />
             </div>
 
-            <Separator />
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="grid gap-1">
-                <Label htmlFor="show-office-tooltips">Show office tooltips</Label>
-                <p className="text-sm text-[#6f6258]">
-                  Enable hover tooltips above agents in the office scene.
-                </p>
-              </div>
-              <Switch
-                checked={props.settings.showOfficeTooltips}
-                id="show-office-tooltips"
-                onCheckedChange={(checked) =>
-                  props.onSettingsChange({
-                    showOfficeTooltips: checked,
-                  })
-                }
-              />
-            </div>
           </Card>
 
           <SheetFooter>

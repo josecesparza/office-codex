@@ -93,6 +93,53 @@ function getHoveredSessionId(slots: AgentSlot[], x: number, y: number): string |
   return null;
 }
 
+function measureSessionGeometries(
+  canvas: HTMLCanvasElement,
+  slots: AgentSlot[],
+): Record<string, SessionGeometry> {
+  const parent = canvas.parentElement;
+
+  if (!parent || canvas.width === 0 || canvas.height === 0) {
+    return {};
+  }
+
+  const canvasRect = canvas.getBoundingClientRect();
+  const parentRect = parent.getBoundingClientRect();
+  const scaleX = canvasRect.width / canvas.width;
+  const scaleY = canvasRect.height / canvas.height;
+  const geometries: Record<string, SessionGeometry> = {};
+
+  for (const slot of slots) {
+    const deskBounds = {
+      height: 16 * scaleY,
+      width: 26 * scaleX,
+      x: canvasRect.left - parentRect.left + (slot.x - 2) * scaleX,
+      y: canvasRect.top - parentRect.top + (slot.y + 1) * scaleY,
+    };
+    const agentBounds = {
+      height: 24 * scaleY,
+      width: 18 * scaleX,
+      x: canvasRect.left - parentRect.left + (slot.x + 5) * scaleX,
+      y: canvasRect.top - parentRect.top + (slot.y - 4) * scaleY,
+    };
+
+    geometries[slot.renderSession.session.sessionId] = {
+      agentBounds,
+      agentCenter: {
+        x: agentBounds.x + agentBounds.width / 2,
+        y: agentBounds.y + agentBounds.height / 2,
+      },
+      deskBounds,
+      deskCenter: {
+        x: deskBounds.x + deskBounds.width / 2,
+        y: deskBounds.y + deskBounds.height / 2,
+      },
+    };
+  }
+
+  return geometries;
+}
+
 function drawBackground(
   ctx: CanvasRenderingContext2D,
   layout: OfficeLayout,
@@ -443,47 +490,7 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     }
 
     const reportGeometries = () => {
-      const parent = canvas.parentElement;
-
-      if (!parent) {
-        return;
-      }
-
-      const canvasRect = canvas.getBoundingClientRect();
-      const parentRect = parent.getBoundingClientRect();
-      const scaleX = canvasRect.width / canvas.width;
-      const scaleY = canvasRect.height / canvas.height;
-      const geometries: Record<string, SessionGeometry> = {};
-
-      for (const slot of slots) {
-        const deskBounds = {
-          height: 16 * scaleY,
-          width: 26 * scaleX,
-          x: canvasRect.left - parentRect.left + (slot.x - 2) * scaleX,
-          y: canvasRect.top - parentRect.top + (slot.y + 1) * scaleY,
-        };
-        const agentBounds = {
-          height: 24 * scaleY,
-          width: 18 * scaleX,
-          x: canvasRect.left - parentRect.left + (slot.x + 5) * scaleX,
-          y: canvasRect.top - parentRect.top + (slot.y - 4) * scaleY,
-        };
-
-        geometries[slot.renderSession.session.sessionId] = {
-          agentBounds,
-          agentCenter: {
-            x: agentBounds.x + agentBounds.width / 2,
-            y: agentBounds.y + agentBounds.height / 2,
-          },
-          deskBounds,
-          deskCenter: {
-            x: deskBounds.x + deskBounds.width / 2,
-            y: deskBounds.y + deskBounds.height / 2,
-          },
-        };
-      }
-
-      onSessionGeometryChange(geometries);
+      onSessionGeometryChange(measureSessionGeometries(canvas, slots));
     };
 
     const frameId = window.requestAnimationFrame(reportGeometries);
@@ -527,6 +534,7 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     canvas.style.maxWidth = "100%";
 
     let frameId = 0;
+    let geometryFrameId = 0;
     let lastFrame = 0;
 
     const draw = (now: number) => {
@@ -601,10 +609,14 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     };
 
     draw(performance.now());
+    geometryFrameId = window.requestAnimationFrame(() => {
+      props.onSessionGeometryChange?.(measureSessionGeometries(canvas, slots));
+    });
     frameId = window.requestAnimationFrame(tick);
 
     return () => {
       window.cancelAnimationFrame(frameId);
+      window.cancelAnimationFrame(geometryFrameId);
     };
   }, [
     deskBadgeMap,
@@ -613,6 +625,7 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     motionEnabled,
     props.lastMutationAt,
     props.layout,
+    props.onSessionGeometryChange,
     props.selectedSessionId,
     props.sessions,
     slots,

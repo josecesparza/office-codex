@@ -44,7 +44,7 @@ export const SheetContent = React.forwardRef<
     <SheetOverlay />
     <DialogPrimitive.Content
       className={cn(
-        "fixed inset-y-0 right-0 z-50 flex w-full max-w-[420px] flex-col gap-5 border-l border-[rgba(32,26,21,0.12)] bg-[rgba(255,252,244,0.98)] p-6 shadow-[-24px_0_60px_rgba(32,26,21,0.18)] outline-none",
+        "fixed inset-y-0 right-0 z-50 flex w-full max-w-[420px] flex-col gap-5 overflow-y-auto border-l border-[rgba(32,26,21,0.12)] bg-[rgba(255,252,244,0.98)] p-6 shadow-[-24px_0_60px_rgba(32,26,21,0.18)] outline-none",
         className,
       )}
       ref={ref}

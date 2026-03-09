@@ -366,23 +366,25 @@ export function App() {
               <span>{metrics.blocked} blocked</span>
             </div>
           </div>
-          <div
-            className="stage-frame"
-            ref={stageFrameRef}
-            style={{
-              boxShadow: `0 18px 60px color-mix(in srgb, ${officePalette.accent} 16%, transparent)`,
-            }}
-          >
-            <OfficeCanvas
-              hoveredSessionId={hoveredSessionId}
-              lastMutationAt={lastMutationAt}
-              layout={effectiveLayout}
-              onHoveredSessionChange={setHoveredSessionId}
-              onSelectedSessionChange={toggleSelection}
-              onSessionGeometryChange={setSessionGeometries}
-              selectedSessionId={selectedSessionId}
-              sessions={liveOfficeSessions}
-            />
+          <div className="stage-scene">
+            <div
+              className="stage-frame"
+              ref={stageFrameRef}
+              style={{
+                boxShadow: `0 18px 60px color-mix(in srgb, ${officePalette.accent} 16%, transparent)`,
+              }}
+            >
+              <OfficeCanvas
+                hoveredSessionId={hoveredSessionId}
+                lastMutationAt={lastMutationAt}
+                layout={effectiveLayout}
+                onHoveredSessionChange={setHoveredSessionId}
+                onSelectedSessionChange={toggleSelection}
+                onSessionGeometryChange={setSessionGeometries}
+                selectedSessionId={selectedSessionId}
+                sessions={liveOfficeSessions}
+              />
+            </div>
 
             {tooltipTarget && tooltipGeometry && tooltipPlacement ? (
               <div

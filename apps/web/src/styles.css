@@ -207,6 +207,12 @@ body {
   text-transform: uppercase;
 }
 
+.stage-scene {
+  position: relative;
+  width: 100%;
+  overflow: visible;
+}
+
 .stage-frame {
   position: relative;
   display: flex;

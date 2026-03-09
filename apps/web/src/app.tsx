@@ -4,6 +4,11 @@ import type { CSSProperties } from "react";
 import { defaultOfficeLayout, officePalette } from "@office-codex/assets";
 import { MiniAgentAvatar } from "./components/mini-agent-avatar";
 import { OfficeCanvas } from "./components/office-canvas";
+import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
+import { Card } from "./components/ui/card";
+import { Separator } from "./components/ui/separator";
+import { formatAccountUsageSummary, shouldShowUnavailableUsage } from "./lib/account-usage";
 import {
   basename,
   formatCompactNumber,
@@ -345,6 +350,7 @@ export function App() {
     tooltipTarget && tooltipGeometry
       ? getTooltipStyle(tooltipGeometry, stageSize.width, stageSize.height)
       : null;
+  const accountUsageSummary = formatAccountUsageSummary(account);
 
   const totalVisibleSessions =
     visibleLiveSessions.length + (showOfflineHistory ? visibleOfflineSessions.length : 0);
@@ -374,37 +380,41 @@ export function App() {
             <span className="connection-dot" />
             {connection}
           </div>
-          {account?.status === "available" ? (
+          {accountUsageSummary ? (
             <div className="connection connection-usage">
               <span className="connection-dot connection-dot-usage" />
-              <span>{account.remainingLabel}</span>
-              {account.resetsAt ? <span className="usage-reset">{account.resetsAt}</span> : null}
+              <span>{accountUsageSummary}</span>
+            </div>
+          ) : shouldShowUnavailableUsage(account) ? (
+            <div className="connection connection-usage connection-usage-unavailable">
+              <span className="connection-dot connection-dot-usage" />
+              <span>usage unavailable</span>
             </div>
           ) : null}
         </div>
       </header>
 
       <section className="health-strip">
-        <article className="health-card">
+        <Card className="health-card">
           <span>Active</span>
           <strong>{metrics.active}</strong>
-        </article>
-        <article className="health-card">
+        </Card>
+        <Card className="health-card">
           <span>Thinking</span>
           <strong>{metrics.thinking}</strong>
-        </article>
-        <article className="health-card">
+        </Card>
+        <Card className="health-card">
           <span>Using tools</span>
           <strong>{metrics.tooling}</strong>
-        </article>
-        <article className="health-card">
+        </Card>
+        <Card className="health-card">
           <span>Waiting</span>
           <strong>{metrics.waiting}</strong>
-        </article>
-        <article className={`health-card ${metrics.blocked > 0 ? "health-card-alert" : ""}`}>
+        </Card>
+        <Card className={`health-card ${metrics.blocked > 0 ? "health-card-alert" : ""}`}>
           <span>Blocked</span>
           <strong>{metrics.blocked}</strong>
-        </article>
+        </Card>
       </section>
 
       <main className="workspace" ref={workspaceRef}>
@@ -437,7 +447,7 @@ export function App() {
           </svg>
         ) : null}
 
-        <section className="stage-card">
+        <Card className="stage-card">
           <div className="stage-header">
             <div>
               <h2>Live office</h2>
@@ -498,10 +508,10 @@ export function App() {
               </div>
             ) : null}
           </div>
-        </section>
+        </Card>
 
         <aside className="session-panel">
-          <section className="insight-card">
+          <Card className="insight-card">
             <div className="panel-subheader">
               <h3>Attention inbox</h3>
               <p>Only sessions that need action or have been waiting too long.</p>
@@ -533,10 +543,10 @@ export function App() {
                 })}
               </div>
             )}
-          </section>
+          </Card>
 
           {selectedOfficeSession ? (
-            <section className="insight-card drawer-card">
+            <Card className="insight-card drawer-card">
               <div className="panel-subheader">
                 <h3>Session drawer</h3>
                 <p>
@@ -569,13 +579,14 @@ export function App() {
                     <p>{selectedOfficeSession.session.state.replaceAll("_", " ")}</p>
                   </div>
                 </div>
-                <button
+                <Button
                   className="panel-button panel-button-ghost"
                   onClick={() => setSelectedSessionId(null)}
+                  variant="ghost"
                   type="button"
                 >
                   Clear
-                </button>
+                </Button>
               </div>
 
               <dl className="drawer-grid">
@@ -642,8 +653,10 @@ export function App() {
                   </ol>
                 )}
               </div>
-            </section>
+            </Card>
           ) : null}
+
+          {selectedOfficeSession ? <Separator className="my-1" /> : null}
 
           <div className="panel-header">
             <div>
@@ -652,15 +665,16 @@ export function App() {
             </div>
             <div className="panel-actions">
               {offlineCount > 0 ? (
-                <button
+                <Button
                   className="panel-button"
                   onClick={() => setShowOfflineHistory((current) => !current)}
                   type="button"
+                  variant="default"
                 >
                   {showOfflineHistory
                     ? `Hide offline history (${offlineCount})`
                     : `Show offline history (${offlineCount})`}
-                </button>
+                </Button>
               ) : null}
             </div>
           </div>
@@ -676,13 +690,13 @@ export function App() {
           ) : null}
 
           {visibleLiveSessions.length === 0 ? (
-            <div className="empty-card">
+            <Card className="empty-card">
               <strong>No live sessions right now.</strong>
               <p>
                 Start one with `office-codex run -- ...`. You can still inspect the offline history
                 whenever you need it.
               </p>
-            </div>
+            </Card>
           ) : (
             <div className="session-list">
               {visibleLiveSessions.map((renderSession) => {
@@ -729,9 +743,9 @@ export function App() {
                           <p>{sessionIdentity.secondary}</p>
                         </div>
                       </div>
-                      <span className={`badge badge-${session.state}`}>
+                      <Badge className={`badge badge-${session.state}`} variant="outline">
                         {stateLabels[session.state]}
-                      </span>
+                      </Badge>
                     </div>
                     <dl>
                       <div>
@@ -768,10 +782,10 @@ export function App() {
               </div>
 
               {historyLoading && visibleOfflineSessions.length === 0 ? (
-                <div className="empty-card">
+                <Card className="empty-card">
                   <strong>Loading offline history.</strong>
                   <p>Fetching the most recent offline sessions from the daemon.</p>
-                </div>
+                </Card>
               ) : (
                 <div className="session-list">
                   {visibleOfflineSessions.map((session) => {
@@ -810,9 +824,9 @@ export function App() {
                               <p>{sessionIdentity.secondary}</p>
                             </div>
                           </div>
-                          <span className={`badge badge-${session.state}`}>
+                          <Badge className={`badge badge-${session.state}`} variant="outline">
                             {stateLabels[session.state]}
-                          </span>
+                          </Badge>
                         </div>
                         <dl>
                           <div>
@@ -841,16 +855,17 @@ export function App() {
           ) : null}
 
           {showOfflineHistory && hiddenOfflineCount > 0 ? (
-            <button
+            <Button
               className="panel-button panel-button-secondary"
               disabled={historyLoading}
               onClick={() => void loadMoreHistory()}
               type="button"
+              variant="secondary"
             >
               {historyLoading
                 ? "Loading offline history..."
                 : `Show ${OFFLINE_PAGE_SIZE} more offline sessions (${hiddenOfflineCount} remaining)`}
-            </button>
+            </Button>
           ) : null}
         </aside>
       </main>

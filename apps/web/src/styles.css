@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 html,
 body {
   max-width: 100%;
@@ -117,11 +119,12 @@ body {
   background: #0284c7;
 }
 
-.usage-reset {
+.connection-usage-unavailable {
   color: #6f6258;
-  font-family: "Menlo", "Monaco", monospace;
-  font-size: 12px;
-  letter-spacing: 0.02em;
+}
+
+.connection-usage-unavailable .connection-dot-usage {
+  background: #b8aa9d;
 }
 
 .connection-error .connection-dot {

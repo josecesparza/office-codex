@@ -4,6 +4,7 @@ import { agentPalette, defaultOfficeLayout, officePalette } from "@office-codex/
 import type { AgentSession, DeskAnchor, OfficeLayout } from "@office-codex/core";
 
 interface OfficeCanvasProps {
+  hoveredSessionId?: string | null;
   layout: OfficeLayout | null;
   sessions: AgentSession[];
   lastMutationAt: number;
@@ -105,13 +106,29 @@ function drawBadge(ctx: CanvasRenderingContext2D, x: number, y: number, color: s
   ctx.fillRect(x + 2, y + 2, 4, 4);
 }
 
-function drawAgent(ctx: CanvasRenderingContext2D, slot: AgentSlot, index: number): void {
+function drawAgent(
+  ctx: CanvasRenderingContext2D,
+  slot: AgentSlot,
+  index: number,
+  options: {
+    hasHoveredSession: boolean;
+    isHovered: boolean;
+  },
+): void {
   const color = agentPalette[index % agentPalette.length] ?? officePalette.accent;
   const x = slot.x + 8;
   const y = slot.y - 4;
 
   ctx.save();
-  ctx.globalAlpha = slot.session.state === "offline" ? 0.38 : 1;
+  const baseAlpha = slot.session.state === "offline" ? 0.38 : 1;
+  ctx.globalAlpha = options.hasHoveredSession && !options.isHovered ? baseAlpha * 0.52 : baseAlpha;
+
+  if (options.isHovered) {
+    ctx.fillStyle = "#fff7c2";
+    ctx.fillRect(x - 4, y - 4, 20, 28);
+    ctx.fillStyle = officePalette.accent;
+    ctx.fillRect(x - 2, y - 2, 16, 24);
+  }
 
   ctx.fillStyle = color;
   ctx.fillRect(x, y + 8, 12, 12);
@@ -159,6 +176,12 @@ function drawAgent(ctx: CanvasRenderingContext2D, slot: AgentSlot, index: number
     ctx.strokeRect(x - 4, y + 20, 20, 4);
   }
 
+  if (options.isHovered) {
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x - 3, y - 3, 18, 26);
+  }
+
   ctx.restore();
 }
 
@@ -168,6 +191,14 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
   const slots = useMemo(
     () => resolveSlots(effectiveLayout, props.sessions),
     [effectiveLayout, props.sessions],
+  );
+  const hasHoveredSession = useMemo(
+    () =>
+      Boolean(
+        props.hoveredSessionId &&
+          props.sessions.some((session) => session.sessionId === props.hoveredSessionId),
+      ),
+    [props.hoveredSessionId, props.sessions],
   );
 
   useEffect(() => {
@@ -209,7 +240,10 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
       }
 
       for (const [index, slot] of slots.entries()) {
-        drawAgent(ctx, slot, index);
+        drawAgent(ctx, slot, index, {
+          hasHoveredSession,
+          isHovered: slot.session.sessionId === props.hoveredSessionId,
+        });
       }
     };
 
@@ -232,7 +266,14 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [effectiveLayout, props.lastMutationAt, props.sessions.length, slots]);
+  }, [
+    effectiveLayout,
+    hasHoveredSession,
+    props.hoveredSessionId,
+    props.lastMutationAt,
+    props.sessions.length,
+    slots,
+  ]);
 
   return <canvas className="office-canvas" ref={canvasRef} />;
 }

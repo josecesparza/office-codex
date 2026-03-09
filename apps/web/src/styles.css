@@ -235,6 +235,16 @@ body {
   padding: 16px 18px;
 }
 
+.session-card {
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.session-card:hover {
+  border-color: rgba(171, 96, 48, 0.32);
+  box-shadow: 0 14px 30px rgba(32, 26, 21, 0.08);
+  transform: translateY(-1px);
+}
+
 .panel-header > div,
 .session-card-head > div,
 .session-card dl > div {

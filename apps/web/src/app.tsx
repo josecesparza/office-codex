@@ -29,6 +29,7 @@ export function App() {
   const lastMutationAt = useOfficeStore((state) => state.lastMutationAt);
   const [showOfflineHistory, setShowOfflineHistory] = useState(false);
   const [offlineLimit, setOfflineLimit] = useState(OFFLINE_PAGE_SIZE);
+  const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
 
   const liveSessions = useMemo(
     () => sessions.filter((session) => session.state !== "offline"),
@@ -111,7 +112,12 @@ export function App() {
               boxShadow: `0 18px 60px color-mix(in srgb, ${officePalette.accent} 16%, transparent)`,
             }}
           >
-            <OfficeCanvas layout={layout} sessions={liveSessions} lastMutationAt={lastMutationAt} />
+            <OfficeCanvas
+              hoveredSessionId={hoveredSessionId}
+              layout={layout}
+              sessions={liveSessions}
+              lastMutationAt={lastMutationAt}
+            />
           </div>
         </section>
 
@@ -159,7 +165,16 @@ export function App() {
           ) : (
             <div className="session-list">
               {rosterSessions.map((session) => (
-                <article className="session-card" key={session.sessionId}>
+                <article
+                  className="session-card"
+                  key={session.sessionId}
+                  onMouseEnter={() => setHoveredSessionId(session.sessionId)}
+                  onMouseLeave={() =>
+                    setHoveredSessionId((current) =>
+                      current === session.sessionId ? null : current,
+                    )
+                  }
+                >
                   <div className="session-card-head">
                     <div>
                       <h3>{session.title || session.sessionId}</h3>

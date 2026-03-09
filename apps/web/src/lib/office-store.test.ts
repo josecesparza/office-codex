@@ -231,11 +231,14 @@ describe("office-store", () => {
     const localStorageMock = {
       getItem() {
         return JSON.stringify({
+          compactMode: true,
           historyPageSize: 50,
           liveRosterLimit: 12,
           reducedMotion: true,
+          showAttentionInbox: false,
           showOfflineHistoryByDefault: true,
           showOfficeTooltips: false,
+          tooltipDetailLevel: "minimal",
         });
       },
       setItem: vi.fn(),
@@ -245,23 +248,32 @@ describe("office-store", () => {
 
     useOfficeStore.getState().hydrateSettings();
     expect(useOfficeStore.getState().settings).toEqual({
+      compactMode: true,
       historyPageSize: 50,
       liveRosterLimit: 12,
       reducedMotion: true,
+      showAttentionInbox: false,
       showOfflineHistoryByDefault: true,
       showOfficeTooltips: false,
+      tooltipDetailLevel: "minimal",
     });
 
     useOfficeStore.getState().updateSettings({
+      compactMode: false,
       liveRosterLimit: 40,
+      showAttentionInbox: true,
       showOfficeTooltips: true,
+      tooltipDetailLevel: "full",
     });
     expect(useOfficeStore.getState().settings).toEqual({
+      compactMode: false,
       historyPageSize: 50,
       liveRosterLimit: 40,
       reducedMotion: true,
+      showAttentionInbox: true,
       showOfflineHistoryByDefault: true,
       showOfficeTooltips: true,
+      tooltipDetailLevel: "full",
     });
 
     useOfficeStore.getState().resetSettings();

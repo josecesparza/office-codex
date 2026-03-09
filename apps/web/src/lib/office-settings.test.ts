@@ -39,26 +39,35 @@ describe("office-settings", () => {
   it("merges partial payloads over defaults", () => {
     const storage = createStorage(
       JSON.stringify({
+        compactMode: true,
         historyPageSize: 50,
+        showAttentionInbox: false,
         showOfficeTooltips: false,
+        tooltipDetailLevel: "minimal",
       }),
     );
 
     expect(loadOfficeUiSettings(storage)).toEqual({
       ...DEFAULT_OFFICE_UI_SETTINGS,
+      compactMode: true,
       historyPageSize: 50,
+      showAttentionInbox: false,
       showOfficeTooltips: false,
+      tooltipDetailLevel: "minimal",
     });
   });
 
   it("falls back to defaults for out-of-range values", () => {
     expect(
       sanitizeOfficeUiSettings({
+        compactMode: "yes",
         historyPageSize: 17,
         liveRosterLimit: 7,
         reducedMotion: true,
+        showAttentionInbox: "maybe",
         showOfflineHistoryByDefault: true,
         showOfficeTooltips: "nope",
+        tooltipDetailLevel: "verbose",
       }),
     ).toEqual({
       ...DEFAULT_OFFICE_UI_SETTINGS,
@@ -71,7 +80,10 @@ describe("office-settings", () => {
     const storage = createStorage();
     const next = {
       ...DEFAULT_OFFICE_UI_SETTINGS,
+      compactMode: true,
       liveRosterLimit: 40 as const,
+      showAttentionInbox: false,
+      tooltipDetailLevel: "minimal" as const,
     };
 
     saveOfficeUiSettings(next, storage);

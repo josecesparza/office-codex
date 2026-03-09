@@ -625,6 +625,63 @@ body {
   gap: 12px;
 }
 
+.shell[data-compact-mode="true"] .insight-card {
+  gap: 12px;
+  padding: 15px;
+}
+
+.shell[data-compact-mode="true"] .panel-subheader {
+  gap: 2px;
+  padding-top: 2px;
+}
+
+.shell[data-compact-mode="true"] .attention-list,
+.shell[data-compact-mode="true"] .session-list,
+.shell[data-compact-mode="true"] .drawer-section,
+.shell[data-compact-mode="true"] .timeline-list {
+  gap: 8px;
+}
+
+.shell[data-compact-mode="true"] .attention-item {
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.shell[data-compact-mode="true"] .session-card,
+.shell[data-compact-mode="true"] .empty-card {
+  padding: 13px 14px 13px 20px;
+}
+
+.shell[data-compact-mode="true"] .session-card dl {
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.shell[data-compact-mode="true"] .session-card h3,
+.shell[data-compact-mode="true"] .empty-card strong {
+  font-size: 16px;
+}
+
+.shell[data-compact-mode="true"] .session-card p,
+.shell[data-compact-mode="true"] .attention-copy span,
+.shell[data-compact-mode="true"] .timeline-list span {
+  font-size: 12px;
+}
+
+.shell[data-compact-mode="true"] .badge {
+  min-width: 104px;
+  padding: 7px 10px;
+  font-size: 11px;
+}
+
+.shell[data-compact-mode="true"] .drawer-card {
+  gap: 14px;
+}
+
+.shell[data-compact-mode="true"] .drawer-grid {
+  gap: 10px;
+}
+
 .session-card,
 .empty-card {
   padding: 16px 18px 16px 24px;

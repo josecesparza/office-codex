@@ -250,10 +250,29 @@ describe("app settings", () => {
     await user.click(screen.getByRole("combobox", { name: /live roster limit/i }));
     await user.click(screen.getByText("12 live cards"));
     expect(container.querySelectorAll(".session-card-live")).toHaveLength(12);
+    expect(container.firstElementChild?.getAttribute("data-compact-mode")).toBe("false");
+
+    await user.click(screen.getByRole("switch", { name: /compact roster mode/i }));
+    expect(container.firstElementChild?.getAttribute("data-compact-mode")).toBe("true");
+
+    expect(screen.getByText("Attention inbox")).toBeTruthy();
+    await user.click(screen.getByRole("switch", { name: /show attention inbox/i }));
+    expect(screen.queryByText("Attention inbox")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /close settings/i }));
     await user.hover(screen.getByTestId("office-canvas"));
-    expect(container.querySelector(".office-tooltip")).not.toBeNull();
+    expect(screen.getByTestId("office-tooltip")).toBeTruthy();
+    expect(screen.getByTestId("office-tooltip").textContent).toContain("Branch");
+    expect(screen.getByTestId("office-tooltip").textContent).toContain("Tool");
+
+    await user.click(screen.getByRole("button", { name: /open settings/i }));
+    await user.click(screen.getByRole("combobox", { name: /tooltip detail level/i }));
+    await user.click(screen.getByText("Minimal tooltip"));
+
+    await user.click(screen.getByRole("button", { name: /close settings/i }));
+    await user.hover(screen.getByTestId("office-canvas"));
+    expect(screen.getByTestId("office-tooltip").textContent).not.toContain("Branch");
+    expect(screen.getByTestId("office-tooltip").textContent).not.toContain("Tool");
 
     await user.click(screen.getByRole("button", { name: /open settings/i }));
     await user.click(screen.getByRole("switch", { name: /show office tooltips/i }));

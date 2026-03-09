@@ -416,7 +416,11 @@ export function App() {
   };
 
   return (
-    <div className="shell" data-reduced-motion={settings.reducedMotion ? "true" : "false"}>
+    <div
+      className="shell"
+      data-compact-mode={settings.compactMode ? "true" : "false"}
+      data-reduced-motion={settings.reducedMotion ? "true" : "false"}
+    >
       <header className="topbar">
         <div>
           <p className="eyebrow">Office Codex</p>
@@ -537,6 +541,7 @@ export function App() {
             {tooltipTarget && tooltipGeometry && tooltipPlacement ? (
               <div
                 className={tooltipPlacement.className}
+                data-testid="office-tooltip"
                 style={
                   {
                     ...tooltipPlacement.style,
@@ -549,56 +554,62 @@ export function App() {
                   <span>{stateLabels[tooltipTarget.session.state]}</span>
                 </div>
                 <strong>{tooltipIdentity?.primary}</strong>
-                <p className="office-tooltip-subtitle">{tooltipIdentity?.secondary}</p>
-                <dl>
-                  <div>
-                    <dt>Branch</dt>
-                    <dd>{tooltipTarget.session.gitBranch ?? "unknown"}</dd>
-                  </div>
-                  <div>
-                    <dt>Tool</dt>
-                    <dd>{tooltipTarget.session.currentTool ?? "none"}</dd>
-                  </div>
-                </dl>
+                {settings.tooltipDetailLevel === "full" ? (
+                  <>
+                    <p className="office-tooltip-subtitle">{tooltipIdentity?.secondary}</p>
+                    <dl>
+                      <div>
+                        <dt>Branch</dt>
+                        <dd>{tooltipTarget.session.gitBranch ?? "unknown"}</dd>
+                      </div>
+                      <div>
+                        <dt>Tool</dt>
+                        <dd>{tooltipTarget.session.currentTool ?? "none"}</dd>
+                      </div>
+                    </dl>
+                  </>
+                ) : null}
               </div>
             ) : null}
           </div>
         </Card>
 
         <aside className="session-panel">
-          <Card className="insight-card">
-            <div className="panel-subheader">
-              <h3>Attention inbox</h3>
-              <p>Only sessions that need action or have been waiting too long.</p>
-            </div>
-
-            {attentionItems.length === 0 ? (
-              <p className="insight-empty">No blocked sessions right now.</p>
-            ) : (
-              <div className="attention-list">
-                {attentionItems.map((item) => {
-                  const sessionIdentity = getRosterIdentity(item.session.session, {
-                    deskBadge: item.session.deskBadge,
-                  });
-
-                  return (
-                    <button
-                      className={`attention-item attention-item-${item.severity}`}
-                      key={`${item.session.session.sessionId}:${item.reason}`}
-                      onClick={() => toggleSelection(item.session.session.sessionId)}
-                      type="button"
-                    >
-                      <span className="attention-badge">{item.session.deskBadge}</span>
-                      <span className="attention-copy">
-                        <strong>{sessionIdentity.primary}</strong>
-                        <span>{item.reason}</span>
-                      </span>
-                    </button>
-                  );
-                })}
+          {settings.showAttentionInbox ? (
+            <Card className="insight-card">
+              <div className="panel-subheader">
+                <h3>Attention inbox</h3>
+                <p>Only sessions that need action or have been waiting too long.</p>
               </div>
-            )}
-          </Card>
+
+              {attentionItems.length === 0 ? (
+                <p className="insight-empty">No blocked sessions right now.</p>
+              ) : (
+                <div className="attention-list">
+                  {attentionItems.map((item) => {
+                    const sessionIdentity = getRosterIdentity(item.session.session, {
+                      deskBadge: item.session.deskBadge,
+                    });
+
+                    return (
+                      <button
+                        className={`attention-item attention-item-${item.severity}`}
+                        key={`${item.session.session.sessionId}:${item.reason}`}
+                        onClick={() => toggleSelection(item.session.session.sessionId)}
+                        type="button"
+                      >
+                        <span className="attention-badge">{item.session.deskBadge}</span>
+                        <span className="attention-copy">
+                          <strong>{sessionIdentity.primary}</strong>
+                          <span>{item.reason}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          ) : null}
 
           {selectedOfficeSession ? (
             <Card className="insight-card drawer-card">

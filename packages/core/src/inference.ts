@@ -143,8 +143,29 @@ export function applyTranscriptEntry(
         entry.timestamp,
         emitted,
       );
-      clearCurrentTool(nextSession, entry.timestamp, emitted, "waiting_user");
-      transitionState(nextSession, "waiting_user", entry.timestamp, emitted);
+      if (nextSession.state === "waiting_user") {
+        clearCurrentTool(nextSession, entry.timestamp, emitted, "waiting_user");
+        return finalizeUpdate(nextSession, entry.timestamp, emitted);
+      }
+
+      clearCurrentTool(nextSession, entry.timestamp, emitted, "inactive");
+      transitionState(nextSession, "inactive", entry.timestamp, emitted);
+      return finalizeUpdate(nextSession, entry.timestamp, emitted);
+
+    case "turn_aborted":
+      updateSubtasks(
+        nextSession,
+        Math.max(nextSession.activeSubtasks - 1, 0),
+        entry.timestamp,
+        emitted,
+      );
+      clearCurrentTool(nextSession, entry.timestamp, emitted, "inactive");
+      transitionState(nextSession, "inactive", entry.timestamp, emitted);
+      return finalizeUpdate(nextSession, entry.timestamp, emitted);
+
+    case "thread_rolled_back":
+      clearCurrentTool(nextSession, entry.timestamp, emitted, "inactive");
+      transitionState(nextSession, "inactive", entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
   }
 

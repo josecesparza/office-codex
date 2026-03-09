@@ -53,4 +53,18 @@ describe("parseTranscriptLines", () => {
       callId: "call-1",
     });
   });
+
+  it("parses cancellation and rollback events", () => {
+    const entries = parseTranscriptLines(`
+{"timestamp":"2026-03-09T23:13:51.151Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-cancel","collaboration_mode_kind":"default"}}
+{"timestamp":"2026-03-09T23:13:57.424Z","type":"event_msg","payload":{"type":"turn_aborted"}}
+{"timestamp":"2026-03-09T23:15:46.108Z","type":"event_msg","payload":{"type":"thread_rolled_back"}}
+    `);
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "task_started",
+      "turn_aborted",
+      "thread_rolled_back",
+    ]);
+  });
 });

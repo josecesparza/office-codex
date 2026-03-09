@@ -97,7 +97,7 @@ describe("startPassiveCodexAdapter", () => {
     handlers.get("add")?.(filePath);
 
     await vi.waitFor(() => {
-      expect(store.get(TEST_SESSION_ID)?.state).toBe("waiting_user");
+      expect(store.get(TEST_SESSION_ID)?.state).toBe("inactive");
       expect(store.get(TEST_SESSION_ID)?.cwd).toBe("/workspace/demo");
     });
 
@@ -193,7 +193,7 @@ describe("startPassiveCodexAdapter", () => {
     handlers.get("change")?.(filePath);
 
     await vi.waitFor(() => {
-      expect(store.get(TEST_SESSION_ID)?.state).toBe("waiting_user");
+      expect(store.get(TEST_SESSION_ID)?.state).toBe("inactive");
       expect(store.get(TEST_SESSION_ID)?.activeSubtasks).toBe(0);
     });
 
@@ -225,7 +225,7 @@ describe("startPassiveCodexAdapter", () => {
     handlers.get("add")?.(filePath);
 
     await vi.waitFor(() => {
-      expect(store.get(TEST_SESSION_ID)?.state).toBe("waiting_user");
+      expect(store.get(TEST_SESSION_ID)?.state).toBe("inactive");
     });
 
     await writeFile(
@@ -259,6 +259,77 @@ describe("startPassiveCodexAdapter", () => {
     await vi.waitFor(() => {
       expect(store.get(TEST_SESSION_ID)?.state).toBe("thinking");
       expect(store.get(TEST_SESSION_ID)?.activeSubtasks).toBe(1);
+    });
+
+    await adapter.close();
+  });
+
+  it("returns canceled turns to inactive after turn_aborted", async () => {
+    const { startPassiveCodexAdapter } = await import("../src/codex-adapter.js");
+    const config = await createCodexHome();
+    const store = new SessionStore();
+    const cursorStore = new CursorStore(getCursorStorePath(config));
+    await cursorStore.load();
+    const adapter = await startPassiveCodexAdapter({
+      config,
+      store,
+      cursorStore,
+      logger: pino({ level: "silent" }),
+    });
+    const filePath = join(
+      config.codexHome,
+      "sessions",
+      "2026",
+      "03",
+      "09",
+      `rollout-2026-03-09T23-13-51-${TEST_SESSION_ID}.jsonl`,
+    );
+
+    await writeFile(
+      filePath,
+      [
+        JSON.stringify({
+          payload: {
+            cwd: "/workspace/demo",
+            id: TEST_SESSION_ID,
+            source: "vscode",
+          },
+          timestamp: "2026-03-09T23:13:51.000Z",
+          type: "session_meta",
+        }),
+        JSON.stringify({
+          payload: {
+            collaboration_mode_kind: "default",
+            turn_id: "turn-cancel",
+            type: "task_started",
+          },
+          timestamp: "2026-03-09T23:13:51.151Z",
+          type: "event_msg",
+        }),
+        JSON.stringify({
+          payload: {
+            type: "turn_aborted",
+          },
+          timestamp: "2026-03-09T23:13:57.424Z",
+          type: "event_msg",
+        }),
+        JSON.stringify({
+          payload: {
+            type: "thread_rolled_back",
+          },
+          timestamp: "2026-03-09T23:15:46.108Z",
+          type: "event_msg",
+        }),
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    handlers.get("add")?.(filePath);
+
+    await vi.waitFor(() => {
+      expect(store.get(TEST_SESSION_ID)?.state).toBe("inactive");
+      expect(store.get(TEST_SESSION_ID)?.activeSubtasks).toBe(0);
     });
 
     await adapter.close();

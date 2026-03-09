@@ -33,7 +33,7 @@ const CONNECTOR_MIN_WIDTH = 1080;
 const TOOLTIP_WIDTH = 276;
 
 const stateLabels: Record<string, string> = {
-  inactive: "Idle",
+  inactive: "Ready",
   thinking: "Thinking",
   using_tool: "Using tool",
   responding: "Responding",

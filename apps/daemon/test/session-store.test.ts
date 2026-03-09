@@ -30,7 +30,7 @@ describe("SessionStore", () => {
     const [session] = store.list();
 
     expect(session?.sessionId).toBe("session-basic");
-    expect(session?.state).toBe("waiting_user");
+    expect(session?.state).toBe("inactive");
     expect(session?.currentTool).toBeNull();
   });
 

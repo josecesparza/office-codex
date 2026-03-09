@@ -157,6 +157,16 @@ export function parseTranscriptLine(line: string): ParsedTranscriptEntry | null 
             timestamp,
             turnId: typeof raw.payload.turn_id === "string" ? raw.payload.turn_id : null,
           };
+        case "turn_aborted":
+          return {
+            kind: "turn_aborted",
+            timestamp,
+          };
+        case "thread_rolled_back":
+          return {
+            kind: "thread_rolled_back",
+            timestamp,
+          };
         default:
           return null;
       }

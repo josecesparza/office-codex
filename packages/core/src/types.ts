@@ -181,6 +181,14 @@ export interface TaskCompleteEntry extends TranscriptBase {
   turnId: string | null;
 }
 
+export interface TurnAbortedEntry extends TranscriptBase {
+  kind: "turn_aborted";
+}
+
+export interface ThreadRolledBackEntry extends TranscriptBase {
+  kind: "thread_rolled_back";
+}
+
 export type ParsedTranscriptEntry =
   | SessionMetaEntry
   | ReasoningEntry
@@ -190,4 +198,6 @@ export type ParsedTranscriptEntry =
   | AgentMessageEntry
   | UserMessageEntry
   | TaskStartedEntry
-  | TaskCompleteEntry;
+  | TaskCompleteEntry
+  | TurnAbortedEntry
+  | ThreadRolledBackEntry;

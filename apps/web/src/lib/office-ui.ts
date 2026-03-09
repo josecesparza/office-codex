@@ -328,9 +328,11 @@ export function getAttentionItems(
       continue;
     }
 
-    if (renderSession.isBlocked) {
+    if (renderSession.session.state === "waiting_user") {
       items.push({
-        reason: `Waiting ${Math.floor((now - Date.parse(renderSession.session.updatedAt)) / 60000)}m`,
+        reason: renderSession.isBlocked
+          ? `Waiting ${Math.floor((now - Date.parse(renderSession.session.updatedAt)) / 60000)}m`
+          : "Awaiting response",
         session: renderSession,
         severity: "warning",
       });

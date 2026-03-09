@@ -137,4 +137,27 @@ describe("office-ui", () => {
       }),
     ]);
   });
+
+  it("includes fresh waiting sessions as awaiting response", () => {
+    const now = Date.parse("2026-03-09T09:10:00.000Z");
+    const waiting = createSession("waiting", {
+      state: "waiting_user",
+      updatedAt: new Date(now - 30_000).toISOString(),
+    });
+    const renderSessions = buildLiveOfficeSessions(
+      [waiting],
+      defaultOfficeLayout,
+      {
+        waiting: "desk-01",
+      },
+      now,
+    );
+
+    expect(getAttentionItems(renderSessions, now)).toEqual([
+      expect.objectContaining({
+        reason: "Awaiting response",
+        severity: "warning",
+      }),
+    ]);
+  });
 });

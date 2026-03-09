@@ -13,6 +13,7 @@
     "start": "node --import tsx apps/cli/src/index.ts dashboard",
     "office:dashboard": "node --import tsx apps/cli/src/index.ts dashboard",
     "office:doctor": "node --import tsx apps/cli/src/index.ts doctor",
+    "office:demo-live": "node --import tsx apps/cli/src/index.ts demo-live",
     "test": "pnpm -r test",
     "test:smoke": "playwright test",
     "check": "pnpm -r check && biome check .",

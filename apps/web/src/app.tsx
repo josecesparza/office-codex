@@ -579,11 +579,11 @@ export function App() {
             <Card className="insight-card">
               <div className="panel-subheader">
                 <h3>Attention inbox</h3>
-                <p>Only sessions that need action or have been waiting too long.</p>
+                <p>Sessions that need action or are waiting on you.</p>
               </div>
 
               {attentionItems.length === 0 ? (
-                <p className="insight-empty">No blocked sessions right now.</p>
+                <p className="insight-empty">No sessions need attention right now.</p>
               ) : (
                 <div className="attention-list">
                   {attentionItems.map((item) => {

@@ -8,6 +8,7 @@ import {
   BLOCKED_WAIT_MS,
   buildLiveOfficeSessions,
   createDeskBadgeMap,
+  getAttentionItems,
   getHeatmapIntensity,
   isBlockedSession,
   reconcileDeskAssignments,
@@ -104,5 +105,36 @@ describe("office-ui", () => {
     expect(isBlockedSession(blocked, now)).toBe(true);
     expect(isBlockedSession(fresh, now)).toBe(false);
     expect(getHeatmapIntensity(fresh, now)).toBeGreaterThan(getHeatmapIntensity(blocked, now));
+  });
+
+  it("surfaces attention items with critical errors first", () => {
+    const now = Date.parse("2026-03-09T09:10:00.000Z");
+    const errored = createSession("errored", {
+      state: "error",
+      updatedAt: "2026-03-09T09:09:50.000Z",
+    });
+    const waiting = createSession("waiting", {
+      state: "waiting_user",
+      updatedAt: new Date(now - BLOCKED_WAIT_MS - 1_000).toISOString(),
+    });
+    const renderSessions = buildLiveOfficeSessions(
+      [waiting, errored],
+      defaultOfficeLayout,
+      {
+        errored: "desk-01",
+        waiting: "desk-02",
+      },
+      now,
+    );
+
+    expect(getAttentionItems(renderSessions, now)).toEqual([
+      expect.objectContaining({
+        reason: "Agent error",
+        severity: "critical",
+      }),
+      expect.objectContaining({
+        severity: "warning",
+      }),
+    ]);
   });
 });

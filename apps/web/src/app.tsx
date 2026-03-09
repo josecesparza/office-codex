@@ -4,11 +4,18 @@ import type { CSSProperties } from "react";
 import { defaultOfficeLayout, officePalette } from "@office-codex/assets";
 import { MiniAgentAvatar } from "./components/mini-agent-avatar";
 import { OfficeCanvas } from "./components/office-canvas";
-import { basename, formatRelative, shortenIdentifier } from "./lib/format";
+import {
+  basename,
+  formatCompactNumber,
+  formatDateTime,
+  formatRelative,
+  shortenIdentifier,
+} from "./lib/format";
 import { useOfficeStore } from "./lib/office-store";
 import {
   type SessionGeometry,
   buildLiveOfficeSessions,
+  getAttentionItems,
   getOfficeMetrics,
   getSessionAccent,
   getSessionAccentSoft,
@@ -142,6 +149,8 @@ export function App() {
   useOfficeData();
 
   const connection = useOfficeStore((state) => state.connection);
+  const account = useOfficeStore((state) => state.account);
+  const activityBySession = useOfficeStore((state) => state.activityBySession);
   const layout = useOfficeStore((state) => state.layout);
   const sessions = useOfficeStore((state) => state.sessions);
   const lastMutationAt = useOfficeStore((state) => state.lastMutationAt);
@@ -257,6 +266,10 @@ export function App() {
   const hiddenOfflineCount = Math.max(offlineSessions.length - visibleOfflineSessions.length, 0);
   const hiddenLiveCount = Math.max(liveOfficeSessions.length - visibleLiveSessions.length, 0);
   const metrics = useMemo(() => getOfficeMetrics(sessions, now), [now, sessions]);
+  const attentionItems = useMemo(
+    () => getAttentionItems(liveOfficeSessions, now),
+    [liveOfficeSessions, now],
+  );
   const linkedSessionId = selectedSessionId ?? hoveredSessionId;
   const selectedOfficeSession = liveOfficeSessions.find(
     (candidate) => candidate.session.sessionId === selectedSessionId,
@@ -268,6 +281,16 @@ export function App() {
   const tooltipTarget =
     hoveredOfficeSession?.session.state === "offline" ? null : hoveredOfficeSession;
   const tooltipIdentity = tooltipTarget ? getTooltipIdentity(tooltipTarget.session) : null;
+  const selectedActivity = selectedSessionId ? (activityBySession[selectedSessionId] ?? []) : [];
+  const selectedRecentTools = useMemo(
+    () =>
+      selectedActivity
+        .filter((item) => item.type === "tool_started" && item.tool)
+        .map((item) => item.tool as string)
+        .filter((tool, index, items) => items.indexOf(tool) === index)
+        .slice(0, 4),
+    [selectedActivity],
+  );
 
   useLayoutEffect(() => {
     const workspace = workspaceRef.current;
@@ -331,9 +354,18 @@ export function App() {
           <p className="eyebrow">Office Codex</p>
           <h1>Pixel dashboard for your local Codex sessions</h1>
         </div>
-        <div className={`connection connection-${connection}`}>
-          <span className="connection-dot" />
-          {connection}
+        <div className="topbar-status">
+          <div className={`connection connection-${connection}`}>
+            <span className="connection-dot" />
+            {connection}
+          </div>
+          {account?.status === "available" ? (
+            <div className="connection connection-usage">
+              <span className="connection-dot connection-dot-usage" />
+              <span>{account.remainingLabel}</span>
+              {account.resetsAt ? <span className="usage-reset">{account.resetsAt}</span> : null}
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -454,6 +486,150 @@ export function App() {
         </section>
 
         <aside className="session-panel">
+          <section className="insight-card">
+            <div className="panel-subheader">
+              <h3>Attention inbox</h3>
+              <p>Only sessions that need action or have been waiting too long.</p>
+            </div>
+
+            {attentionItems.length === 0 ? (
+              <p className="insight-empty">No blocked sessions right now.</p>
+            ) : (
+              <div className="attention-list">
+                {attentionItems.map((item) => {
+                  const sessionIdentity = getRosterIdentity(item.session.session, {
+                    deskBadge: item.session.deskBadge,
+                  });
+
+                  return (
+                    <button
+                      className={`attention-item attention-item-${item.severity}`}
+                      key={`${item.session.session.sessionId}:${item.reason}`}
+                      onClick={() => toggleSelection(item.session.session.sessionId)}
+                      type="button"
+                    >
+                      <span className="attention-badge">{item.session.deskBadge}</span>
+                      <span className="attention-copy">
+                        <strong>{sessionIdentity.primary}</strong>
+                        <span>{item.reason}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {selectedOfficeSession ? (
+            <section className="insight-card drawer-card">
+              <div className="panel-subheader">
+                <h3>Session drawer</h3>
+                <p>
+                  {
+                    getRosterIdentity(selectedOfficeSession.session, {
+                      deskBadge: selectedOfficeSession.deskBadge,
+                    }).secondary
+                  }
+                </p>
+              </div>
+
+              <div className="drawer-header">
+                <div className="session-card-identity">
+                  <div className="session-card-badge-stack">
+                    <span className="desk-badge">{selectedOfficeSession.deskBadge}</span>
+                    <MiniAgentAvatar
+                      color={selectedOfficeSession.accentColor}
+                      label={`Agent ${selectedOfficeSession.deskBadge}`}
+                      variant={selectedOfficeSession.variant}
+                    />
+                  </div>
+                  <div>
+                    <h3>
+                      {
+                        getRosterIdentity(selectedOfficeSession.session, {
+                          deskBadge: selectedOfficeSession.deskBadge,
+                        }).primary
+                      }
+                    </h3>
+                    <p>{selectedOfficeSession.session.state.replaceAll("_", " ")}</p>
+                  </div>
+                </div>
+                <button
+                  className="panel-button panel-button-ghost"
+                  onClick={() => setSelectedSessionId(null)}
+                  type="button"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <dl className="drawer-grid">
+                <div>
+                  <dt>Repo</dt>
+                  <dd>{basename(selectedOfficeSession.session.cwd)}</dd>
+                </div>
+                <div>
+                  <dt>Branch</dt>
+                  <dd>{selectedOfficeSession.session.gitBranch ?? "unknown"}</dd>
+                </div>
+                <div>
+                  <dt>Started</dt>
+                  <dd>{formatDateTime(selectedOfficeSession.session.startedAt)}</dd>
+                </div>
+                <div>
+                  <dt>Updated</dt>
+                  <dd>{formatRelative(selectedOfficeSession.session.updatedAt)}</dd>
+                </div>
+                <div>
+                  <dt>Tokens used</dt>
+                  <dd>{formatCompactNumber(selectedOfficeSession.session.tokensUsed)}</dd>
+                </div>
+                <div>
+                  <dt>Subtasks</dt>
+                  <dd>{selectedOfficeSession.session.activeSubtasks}</dd>
+                </div>
+              </dl>
+
+              <div className="drawer-section">
+                <div className="drawer-section-head">
+                  <h4>Recent tools</h4>
+                </div>
+                {selectedRecentTools.length === 0 ? (
+                  <p className="insight-empty">No tool activity recorded yet.</p>
+                ) : (
+                  <div className="tool-chip-list">
+                    {selectedRecentTools.map((tool) => (
+                      <span className="tool-chip" key={tool}>
+                        {tool}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="drawer-section">
+                <div className="drawer-section-head">
+                  <h4>Activity timeline</h4>
+                </div>
+                {selectedActivity.length === 0 ? (
+                  <p className="insight-empty">No activity recorded yet.</p>
+                ) : (
+                  <ol className="timeline-list">
+                    {selectedActivity.slice(0, 6).map((item) => (
+                      <li key={item.id}>
+                        <span className={`timeline-dot timeline-dot-${item.state}`} />
+                        <div>
+                          <strong>{item.label}</strong>
+                          <span>{formatRelative(item.timestamp)}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </section>
+          ) : null}
+
           <div className="panel-header">
             <div>
               <h2>Session roster</h2>

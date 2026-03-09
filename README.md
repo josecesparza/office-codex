@@ -11,6 +11,13 @@ The project is split into three local pieces:
 The implementation targets macOS first, reads from `~/.codex`, and keeps chat content private by
 exposing only session metadata and inferred activity states.
 
+Recent UI additions:
+
+- title hydration from Codex metadata with a local-only fallback derived from `threads.first_user_message`
+- `Attention inbox` for blocked and errored sessions
+- `Session drawer` with repo, branch, token usage, recent tools, and a short activity timeline
+- account usage plumbing via `GET /api/account`, hidden in the UI unless a reliable source exists
+
 ## Stack
 
 - Node.js 22.21+
@@ -113,6 +120,32 @@ Typical manual test flow:
 - `apps/web`: React dashboard that renders the office on a single `<canvas>`
 - `packages/core`: shared types, JSONL parsing, state inference
 - `packages/assets`: fixed layout, palette, and project-owned pixel primitives
+
+## Local API
+
+- `GET /api/health`: daemon health and connection status
+- `GET /api/layout`: fixed office layout used by the canvas
+- `GET /api/sessions`: current session snapshot, including `tokensUsed` when available
+- `GET /api/events`: live session events over SSE
+- `GET /api/account`: account usage status
+
+`/api/account` only surfaces a quota pill when the daemon can verify a reliable local source. If
+that source is missing or incomplete, the UI stays silent instead of guessing.
+
+## Title Hydration
+
+Session titles use this precedence:
+
+1. `threads.title` when it looks human
+2. `session_index.thread_name` when it looks human
+3. a short local-only title derived from `threads.first_user_message`
+4. UI fallback based on repo, branch, and desk identity
+
+You can disable prompt-derived hydration with:
+
+```bash
+OFFICE_CODEX_TITLE_HYDRATION_MODE=metadata pnpm office:dashboard
+```
 
 ## Privacy
 

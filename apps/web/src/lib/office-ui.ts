@@ -34,6 +34,12 @@ export interface OfficeRenderSession {
   variant: number;
 }
 
+export interface AttentionItem {
+  reason: string;
+  session: OfficeRenderSession;
+  severity: "critical" | "warning";
+}
+
 function clampChannel(value: number): number {
   return Math.max(0, Math.min(255, Math.round(value)));
 }
@@ -303,4 +309,41 @@ export function getOfficeMetrics(sessions: AgentSession[], now: number) {
     tooling: sessions.filter((session) => session.state === "using_tool").length,
     waiting: sessions.filter((session) => session.state === "waiting_user").length,
   };
+}
+
+export function getAttentionItems(
+  sessions: OfficeRenderSession[],
+  now: number,
+  limit = 4,
+): AttentionItem[] {
+  const items: AttentionItem[] = [];
+
+  for (const renderSession of sessions) {
+    if (renderSession.session.state === "error") {
+      items.push({
+        reason: "Agent error",
+        session: renderSession,
+        severity: "critical",
+      });
+      continue;
+    }
+
+    if (renderSession.isBlocked) {
+      items.push({
+        reason: `Waiting ${Math.floor((now - Date.parse(renderSession.session.updatedAt)) / 60000)}m`,
+        session: renderSession,
+        severity: "warning",
+      });
+    }
+  }
+
+  return items
+    .sort((left, right) => {
+      if (left.severity !== right.severity) {
+        return left.severity === "critical" ? -1 : 1;
+      }
+
+      return right.session.session.updatedAt.localeCompare(left.session.session.updatedAt);
+    })
+    .slice(0, limit);
 }

@@ -47,3 +47,29 @@ export function shortenIdentifier(value: string, lead = 8, tail = 4): string {
 
   return `${value.slice(0, lead)}...${value.slice(-tail)}`;
 }
+
+export function formatCompactNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "unknown";
+  }
+
+  return new Intl.NumberFormat("en", {
+    maximumFractionDigits: value >= 1_000_000 ? 1 : 0,
+    notation: "compact",
+  }).format(value);
+}
+
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+
+  if (Number.isNaN(date.getTime())) {
+    return "unknown";
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+  }).format(date);
+}

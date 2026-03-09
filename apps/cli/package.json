@@ -1,0 +1,22 @@
+{
+  "name": "@office-codex/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "office-codex": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "dev": "tsx src/index.ts dashboard",
+    "start": "tsx src/index.ts dashboard",
+    "test": "vitest run --passWithNoTests",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@office-codex/core": "workspace:*",
+    "@office-codex/daemon": "workspace:*",
+    "execa": "^9.5.2",
+    "zod": "^3.24.2"
+  }
+}

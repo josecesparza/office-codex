@@ -15,11 +15,15 @@ export const DEFAULT_WRAPPER_HINT_TTL_MS = 120_000;
 export const DEFAULT_HISTORY_LIMIT = 50;
 export const MAX_HISTORY_LIMIT = 200;
 export const DEFAULT_TITLE_HYDRATION_MODE = "first_user_message";
+export const DEFAULT_CHATGPT_ORIGIN = "https://chatgpt.com";
+export const DEFAULT_ACCOUNT_REFRESH_MS = 60_000;
 
 export type TitleHydrationMode = "metadata" | "first_user_message";
 
 export interface DaemonConfig {
+  accountRefreshMs: number;
   port: number;
+  chatGptOrigin: string;
   codexHome: string;
   dataDir: string;
   idleMs: number;
@@ -43,13 +47,27 @@ function parseTitleHydrationMode(value: string | undefined): TitleHydrationMode 
   return value === "metadata" ? "metadata" : DEFAULT_TITLE_HYDRATION_MODE;
 }
 
+function parseOrigin(value: string | undefined, fallback: string): string {
+  if (!value) {
+    return fallback;
+  }
+
+  return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
 export function resolveDaemonConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
   const paths = envPaths("office-codex", { suffix: "" });
   const codexHome = resolve(process.env.OFFICE_CODEX_CODEX_HOME ?? join(homedir(), ".codex"));
   const dataDir = process.env.OFFICE_CODEX_DATA_DIR ?? paths.data;
 
   return {
+    accountRefreshMs:
+      overrides.accountRefreshMs ??
+      parseNumber(process.env.OFFICE_CODEX_ACCOUNT_REFRESH_MS, DEFAULT_ACCOUNT_REFRESH_MS),
     port: overrides.port ?? parseNumber(process.env.OFFICE_CODEX_PORT, DEFAULT_PORT),
+    chatGptOrigin:
+      overrides.chatGptOrigin ??
+      parseOrigin(process.env.OFFICE_CODEX_CHATGPT_ORIGIN, DEFAULT_CHATGPT_ORIGIN),
     codexHome: overrides.codexHome ?? codexHome,
     dataDir: overrides.dataDir ?? dataDir,
     bootstrapSeedLimit:

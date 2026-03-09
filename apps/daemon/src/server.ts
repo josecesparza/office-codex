@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { defaultOfficeLayout } from "@office-codex/assets";
 
+import type { AccountUsageService } from "./account-usage.js";
 import type { PassiveCodexAdapter } from "./codex-adapter.js";
 import {
   DEFAULT_HISTORY_LIMIT,
@@ -61,9 +62,9 @@ const wrapperEventSchema = z.discriminatedUnion("type", [
 
 export async function createServer(options: {
   adapter: PassiveCodexAdapter;
+  accountUsage: AccountUsageService;
   config: DaemonConfig;
   cursorStore: CursorStore;
-  getAccountUsage(): Promise<AccountUsageStatus>;
   logger: pino.Logger;
   startedAt: number;
   store: SessionStore;
@@ -96,7 +97,7 @@ export async function createServer(options: {
       },
       adapter: options.adapter.getMetrics(),
       cursorStore: options.cursorStore.getDiagnostics(),
-      account: await options.getAccountUsage(),
+      account: options.accountUsage.getSnapshot(),
       wrapperHints: options.wrapperEvents.getDiagnostics(),
     };
   });
@@ -124,7 +125,7 @@ export async function createServer(options: {
   });
 
   app.get("/api/account", async () => ({
-    account: await options.getAccountUsage(),
+    account: options.accountUsage.getSnapshot(),
   }));
 
   app.get("/api/layout", async () => ({
@@ -143,6 +144,9 @@ export async function createServer(options: {
       "snapshot",
       options.store.query({ limit: DEFAULT_HISTORY_LIMIT, scope: "all" }),
     );
+    writeSse(reply.raw, "account_updated", {
+      account: options.accountUsage.getSnapshot(),
+    });
 
     const unsubscribe = options.store.subscribe((event) => {
       writeSse(reply.raw, event.type, {
@@ -150,9 +154,15 @@ export async function createServer(options: {
         session: options.store.get(event.sessionId) ?? null,
       });
     });
+    const unsubscribeAccount = options.accountUsage.subscribe((account) => {
+      writeSse(reply.raw, "account_updated", {
+        account,
+      });
+    });
 
     request.raw.on("close", () => {
       unsubscribe();
+      unsubscribeAccount();
       reply.raw.end();
     });
   });

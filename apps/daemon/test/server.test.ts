@@ -78,9 +78,36 @@ async function createTestServer() {
         };
       },
     },
+    accountUsage: {
+      getSnapshot() {
+        return {
+          source: "test",
+          status: "available" as const,
+          windows: [
+            {
+              key: "five_hour" as const,
+              label: "5h",
+              remainingPercent: 96,
+              resetsAt: "1:43 AM",
+            },
+            {
+              key: "weekly" as const,
+              label: "Weekly",
+              remainingPercent: 96,
+              resetsAt: "Mar 16",
+            },
+          ],
+        };
+      },
+      subscribe() {
+        return () => undefined;
+      },
+    },
     codexHome: root,
     config: {
+      accountRefreshMs: 60_000,
       bootstrapSeedLimit: DEFAULT_BOOTSTRAP_SEED_LIMIT,
+      chatGptOrigin: "https://chatgpt.com",
       codexHome: root,
       cursorFlushMs: DEFAULT_CURSOR_FLUSH_MS,
       dataDir: join(root, "data"),
@@ -91,11 +118,6 @@ async function createTestServer() {
       wrapperHintTtlMs: DEFAULT_WRAPPER_HINT_TTL_MS,
     },
     cursorStore,
-    getAccountUsage: async () => ({
-      remainingLabel: "Unlimited",
-      source: "test",
-      status: "available",
-    }),
     logger: pino({ level: "silent" }),
     startedAt: Date.now() - 12_000,
     store,
@@ -121,6 +143,10 @@ describe("createServer", () => {
       method: "GET",
       url: "/api/sessions?scope=history&limit=1",
     });
+    const accountResponse = await app.inject({
+      method: "GET",
+      url: "/api/account",
+    });
     const healthResponse = await app.inject({
       method: "GET",
       url: "/api/health",
@@ -134,6 +160,26 @@ describe("createServer", () => {
       historyResponse.json().sessions.map((session: { sessionId: string }) => session.sessionId),
     ).toEqual(["offline-2"]);
     expect(historyResponse.json().meta.hasMoreHistory).toBe(true);
+    expect(accountResponse.json()).toEqual({
+      account: {
+        source: "test",
+        status: "available",
+        windows: [
+          {
+            key: "five_hour",
+            label: "5h",
+            remainingPercent: 96,
+            resetsAt: "1:43 AM",
+          },
+          {
+            key: "weekly",
+            label: "Weekly",
+            remainingPercent: 96,
+            resetsAt: "Mar 16",
+          },
+        ],
+      },
+    });
     expect(healthResponse.json().sessions).toMatchObject({
       live: 1,
       offline: 2,

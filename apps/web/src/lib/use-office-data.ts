@@ -134,6 +134,14 @@ export function useOfficeData(): UseOfficeDataResult {
       }
     });
 
+    source.addEventListener("account_updated", (event) => {
+      const payload = JSON.parse(event.data) as { account: AccountUsageStatus };
+
+      if (!disposed) {
+        setAccount(payload.account);
+      }
+    });
+
     for (const eventType of daemonEventTypes) {
       source.addEventListener(eventType, (event) => {
         const payload = JSON.parse(event.data) as EventEnvelope;

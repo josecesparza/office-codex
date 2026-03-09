@@ -2,8 +2,8 @@ import { fileURLToPath } from "node:url";
 
 import pino from "pino";
 
-import { readAccountUsageStatus } from "./account-usage.js";
-import { findLatestStateDb, startPassiveCodexAdapter } from "./codex-adapter.js";
+import { AccountUsageService } from "./account-usage.js";
+import { startPassiveCodexAdapter } from "./codex-adapter.js";
 import {
   type DaemonConfig,
   getCursorStorePath,
@@ -40,20 +40,22 @@ export async function startDaemon(overrides: Partial<DaemonConfig> = {}): Promis
     logger,
   });
   const wrapperEvents = new WrapperEventHandler(store, config.wrapperHintTtlMs);
+  const accountUsage = new AccountUsageService({
+    chatGptOrigin: config.chatGptOrigin,
+    codexHome: config.codexHome,
+    logger,
+    refreshMs: config.accountRefreshMs,
+  });
+  await accountUsage.start();
   const webDistDir = fileURLToPath(new URL("../../web/dist", import.meta.url));
   const server = await createServer({
     adapter,
+    accountUsage,
     config,
     cursorStore,
     logger,
     store,
     codexHome: config.codexHome,
-    getAccountUsage: async () => {
-      const stateDbPath = (await pathExists(config.codexHome))
-        ? await findLatestStateDb(config.codexHome)
-        : null;
-      return readAccountUsageStatus(stateDbPath, logger);
-    },
     startedAt,
     webDistDir,
     wrapperEvents,
@@ -71,6 +73,7 @@ export async function startDaemon(overrides: Partial<DaemonConfig> = {}): Promis
     store,
     async close() {
       await adapter.close();
+      await accountUsage.close();
       await server.close();
     },
   };

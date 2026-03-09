@@ -81,10 +81,16 @@ export interface OfficeLayout {
   desks: DeskAnchor[];
 }
 
+export interface AccountUsageWindow {
+  key: "five_hour" | "weekly";
+  label: string;
+  remainingPercent: number;
+  resetsAt: string | null;
+}
+
 export interface AccountUsageStatus {
   status: "available" | "unavailable" | "error";
-  remainingLabel?: string;
-  resetsAt?: string;
+  windows?: AccountUsageWindow[];
   source?: string;
 }
 

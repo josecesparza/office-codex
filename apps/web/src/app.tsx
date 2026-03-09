@@ -115,6 +115,7 @@ export function App() {
             <OfficeCanvas
               hoveredSessionId={hoveredSessionId}
               layout={layout}
+              onHoveredSessionChange={setHoveredSessionId}
               sessions={liveSessions}
               lastMutationAt={lastMutationAt}
             />
@@ -166,7 +167,9 @@ export function App() {
             <div className="session-list">
               {rosterSessions.map((session) => (
                 <article
-                  className="session-card"
+                  className={`session-card ${
+                    session.sessionId === hoveredSessionId ? "session-card-active" : ""
+                  }`}
                   key={session.sessionId}
                   onMouseEnter={() => setHoveredSessionId(session.sessionId)}
                   onMouseLeave={() =>

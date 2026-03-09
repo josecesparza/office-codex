@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { agentPalette, defaultOfficeLayout, officePalette } from "@office-codex/assets";
 import type { AgentSession, DeskAnchor, OfficeLayout } from "@office-codex/core";
@@ -6,6 +7,7 @@ import type { AgentSession, DeskAnchor, OfficeLayout } from "@office-codex/core"
 interface OfficeCanvasProps {
   hoveredSessionId?: string | null;
   layout: OfficeLayout | null;
+  onHoveredSessionChange?: (sessionId: string | null) => void;
   sessions: AgentSession[];
   lastMutationAt: number;
 }
@@ -60,6 +62,25 @@ function resolveSlots(layout: OfficeLayout, sessions: AgentSession[]): AgentSlot
       overflow: true,
     };
   });
+}
+
+function getHoveredSessionId(slots: AgentSlot[], x: number, y: number): string | null {
+  for (let index = slots.length - 1; index >= 0; index -= 1) {
+    const slot = slots[index];
+
+    if (!slot) {
+      continue;
+    }
+
+    const agentX = slot.x + 8;
+    const agentY = slot.y - 4;
+
+    if (x >= agentX - 2 && x <= agentX + 14 && y >= agentY && y <= agentY + 22) {
+      return slot.session.sessionId;
+    }
+  }
+
+  return null;
 }
 
 function drawBackground(ctx: CanvasRenderingContext2D, layout: OfficeLayout): void {
@@ -290,5 +311,37 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     slots,
   ]);
 
-  return <canvas className="office-canvas" ref={canvasRef} />;
+  const handleMouseMove = (event: ReactMouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    const bounds = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / bounds.width;
+    const scaleY = canvas.height / bounds.height;
+    const hoveredSessionId = getHoveredSessionId(
+      slots,
+      (event.clientX - bounds.left) * scaleX,
+      (event.clientY - bounds.top) * scaleY,
+    );
+
+    event.currentTarget.style.cursor = hoveredSessionId ? "pointer" : "default";
+    props.onHoveredSessionChange?.(hoveredSessionId);
+  };
+
+  const handleMouseLeave = (event: ReactMouseEvent<HTMLCanvasElement>) => {
+    event.currentTarget.style.cursor = "default";
+    props.onHoveredSessionChange?.(null);
+  };
+
+  return (
+    <canvas
+      className="office-canvas"
+      onMouseLeave={handleMouseLeave}
+      onMouseMove={handleMouseMove}
+      ref={canvasRef}
+    />
+  );
 }

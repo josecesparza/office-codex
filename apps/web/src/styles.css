@@ -245,6 +245,12 @@ body {
   transform: translateY(-1px);
 }
 
+.session-card-active {
+  border-color: rgba(171, 96, 48, 0.42);
+  box-shadow: 0 16px 34px rgba(171, 96, 48, 0.16);
+  transform: translateY(-1px);
+}
+
 .panel-header > div,
 .session-card-head > div,
 .session-card dl > div {

@@ -858,6 +858,21 @@ body {
   background: #fecaca;
 }
 
+.shell[data-reduced-motion="true"] .panel-button,
+.shell[data-reduced-motion="true"] .session-card,
+.shell[data-reduced-motion="true"] .attention-item {
+  transition: none;
+}
+
+.shell[data-reduced-motion="true"] .panel-button:hover,
+.shell[data-reduced-motion="true"] .session-card-live:hover,
+.shell[data-reduced-motion="true"] .session-card-live:focus-visible,
+.shell[data-reduced-motion="true"] .session-card-selected,
+.shell[data-reduced-motion="true"] .attention-item:hover,
+.shell[data-reduced-motion="true"] .attention-item:focus-visible {
+  transform: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .panel-button,
   .session-card,

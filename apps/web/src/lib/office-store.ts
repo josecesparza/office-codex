@@ -10,6 +10,14 @@ import {
   type OfficeLayout,
 } from "@office-codex/core";
 
+import {
+  DEFAULT_OFFICE_UI_SETTINGS,
+  type OfficeUiSettings,
+  loadOfficeUiSettings,
+  sanitizeOfficeUiSettings,
+  saveOfficeUiSettings,
+} from "./office-settings";
+
 export type ConnectionState = "connecting" | "ready" | "error";
 
 export interface EventEnvelope {
@@ -42,11 +50,14 @@ interface OfficeState {
   historySessions: AgentSession[];
   layout: OfficeLayout | null;
   liveSessions: AgentSession[];
+  settings: OfficeUiSettings;
   sessionMeta: SessionCollectionMeta | null;
   sessions: AgentSession[];
   lastMutationAt: number;
   setAccount(account: AccountUsageStatus): void;
   setConnection(connection: ConnectionState): void;
+  hydrateSettings(): void;
+  resetSettings(): void;
   setHistoryPage(
     sessions: AgentSession[],
     meta: SessionCollectionMeta,
@@ -55,6 +66,7 @@ interface OfficeState {
   setLayout(layout: OfficeLayout): void;
   setLiveSnapshot(sessions: AgentSession[], meta: SessionCollectionMeta): void;
   setSnapshot(sessions: AgentSession[], meta?: SessionCollectionMeta): void;
+  updateSettings(patch: Partial<OfficeUiSettings>): void;
   applyEnvelope(envelope: EventEnvelope): void;
 }
 
@@ -246,6 +258,7 @@ export const useOfficeStore = create<OfficeState>((set) => ({
   historySessions: [],
   layout: null,
   liveSessions: [],
+  settings: loadOfficeUiSettings(),
   sessionMeta: null,
   sessions: [],
   lastMutationAt: Date.now(),
@@ -254,6 +267,17 @@ export const useOfficeStore = create<OfficeState>((set) => ({
   },
   setConnection(connection) {
     set({ connection });
+  },
+  hydrateSettings() {
+    set({
+      settings: loadOfficeUiSettings(),
+    });
+  },
+  resetSettings() {
+    saveOfficeUiSettings(DEFAULT_OFFICE_UI_SETTINGS);
+    set({
+      settings: DEFAULT_OFFICE_UI_SETTINGS,
+    });
   },
   setLayout(layout) {
     set({
@@ -353,6 +377,20 @@ export const useOfficeStore = create<OfficeState>((set) => ({
         ),
         sessions: nextSessions,
         lastMutationAt: Date.now(),
+      };
+    });
+  },
+  updateSettings(patch) {
+    set((state) => {
+      const settings = sanitizeOfficeUiSettings({
+        ...state.settings,
+        ...patch,
+      });
+
+      saveOfficeUiSettings(settings);
+
+      return {
+        settings,
       };
     });
   },

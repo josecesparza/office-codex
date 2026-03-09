@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import { defaultOfficeLayout, officePalette } from "@office-codex/assets";
 import { MiniAgentAvatar } from "./components/mini-agent-avatar";
 import { OfficeCanvas } from "./components/office-canvas";
+import { OfficeSettingsSheet } from "./components/office-settings-sheet";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card } from "./components/ui/card";
@@ -28,8 +29,6 @@ import {
 } from "./lib/office-ui";
 import { useOfficeData } from "./lib/use-office-data";
 
-const ROSTER_LIVE_LIMIT = 20;
-const OFFLINE_PAGE_SIZE = 20;
 const CONNECTOR_MIN_WIDTH = 1080;
 const TOOLTIP_WIDTH = 276;
 
@@ -156,12 +155,19 @@ export function App() {
   const connection = useOfficeStore((state) => state.connection);
   const account = useOfficeStore((state) => state.account);
   const activityBySession = useOfficeStore((state) => state.activityBySession);
+  const hydrateSettings = useOfficeStore((state) => state.hydrateSettings);
   const historySessions = useOfficeStore((state) => state.historySessions);
   const layout = useOfficeStore((state) => state.layout);
   const liveSessions = useOfficeStore((state) => state.liveSessions);
   const lastMutationAt = useOfficeStore((state) => state.lastMutationAt);
+  const resetSettings = useOfficeStore((state) => state.resetSettings);
+  const settings = useOfficeStore((state) => state.settings);
   const sessionMeta = useOfficeStore((state) => state.sessionMeta);
-  const [showOfflineHistory, setShowOfflineHistory] = useState(false);
+  const updateSettings = useOfficeStore((state) => state.updateSettings);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showOfflineHistory, setShowOfflineHistory] = useState(
+    settings.showOfflineHistoryByDefault,
+  );
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [deskAssignments, setDeskAssignments] = useState<Record<string, string>>({});
@@ -173,6 +179,7 @@ export function App() {
   const workspaceRef = useRef<HTMLElement | null>(null);
   const stageFrameRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef(new Map<string, HTMLElement>());
+  const previousHistoryPageSizeRef = useRef(settings.historyPageSize);
 
   const effectiveLayout = layout ?? defaultOfficeLayout;
   const liveCount = sessionMeta?.liveCount ?? liveSessions.length;
@@ -180,6 +187,14 @@ export function App() {
     sessionMeta?.offlineCount ?? historySessions.length,
     historySessions.length,
   );
+
+  useEffect(() => {
+    hydrateSettings();
+  }, [hydrateSettings]);
+
+  useEffect(() => {
+    setShowOfflineHistory(settings.showOfflineHistoryByDefault);
+  }, [settings.showOfflineHistoryByDefault]);
 
   useEffect(() => {
     setDeskAssignments((current) =>
@@ -274,13 +289,30 @@ export function App() {
     showOfflineHistory,
   ]);
 
+  useEffect(() => {
+    const previousPageSize = previousHistoryPageSizeRef.current;
+
+    if (previousPageSize === settings.historyPageSize) {
+      return;
+    }
+
+    previousHistoryPageSizeRef.current = settings.historyPageSize;
+
+    if (showOfflineHistory) {
+      void loadMoreHistory({
+        limit: settings.historyPageSize,
+        reset: true,
+      });
+    }
+  }, [loadMoreHistory, settings.historyPageSize, showOfflineHistory]);
+
   const liveOfficeSessions = useMemo(
     () => buildLiveOfficeSessions(liveSessions, effectiveLayout, resolvedDeskAssignments, now),
     [effectiveLayout, liveSessions, now, resolvedDeskAssignments],
   );
   const visibleLiveSessions = useMemo(
-    () => liveOfficeSessions.slice(0, ROSTER_LIVE_LIMIT),
-    [liveOfficeSessions],
+    () => liveOfficeSessions.slice(0, settings.liveRosterLimit),
+    [liveOfficeSessions, settings.liveRosterLimit],
   );
   const visibleOfflineSessions = useMemo(() => historySessions, [historySessions]);
   const hiddenOfflineCount = Math.max(offlineCount - visibleOfflineSessions.length, 0);
@@ -299,7 +331,9 @@ export function App() {
   );
   const tooltipGeometry = hoveredSessionId ? sessionGeometries[hoveredSessionId] : null;
   const tooltipTarget =
-    hoveredOfficeSession?.session.state === "offline" ? null : hoveredOfficeSession;
+    !settings.showOfficeTooltips || hoveredOfficeSession?.session.state === "offline"
+      ? null
+      : hoveredOfficeSession;
   const tooltipIdentity = tooltipTarget ? getTooltipIdentity(tooltipTarget.session) : null;
   const selectedActivity = selectedSessionId ? (activityBySession[selectedSessionId] ?? []) : [];
   const selectedRecentTools = useMemo(
@@ -368,14 +402,34 @@ export function App() {
     setSelectedSessionId((current) => (current === sessionId ? null : sessionId));
   };
 
+  const handleSettingsChange = (patch: Partial<typeof settings>) => {
+    updateSettings(patch);
+
+    if (patch.showOfflineHistoryByDefault !== undefined) {
+      setShowOfflineHistory(patch.showOfflineHistoryByDefault);
+    }
+  };
+
+  const handleResetSettings = () => {
+    resetSettings();
+    setShowOfflineHistory(false);
+  };
+
   return (
-    <div className="shell">
+    <div className="shell" data-reduced-motion={settings.reducedMotion ? "true" : "false"}>
       <header className="topbar">
         <div>
           <p className="eyebrow">Office Codex</p>
           <h1>Pixel dashboard for your local Codex sessions</h1>
         </div>
         <div className="topbar-status">
+          <OfficeSettingsSheet
+            onOpenChange={setSettingsOpen}
+            onReset={handleResetSettings}
+            onSettingsChange={handleSettingsChange}
+            open={settingsOpen}
+            settings={settings}
+          />
           <div className={`connection connection-${connection}`}>
             <span className="connection-dot" />
             {connection}
@@ -474,6 +528,7 @@ export function App() {
                 onHoveredSessionChange={setHoveredSessionId}
                 onSelectedSessionChange={toggleSelection}
                 onSessionGeometryChange={setSessionGeometries}
+                reducedMotion={settings.reducedMotion}
                 selectedSessionId={selectedSessionId}
                 sessions={liveOfficeSessions}
               />
@@ -686,7 +741,9 @@ export function App() {
           </div>
 
           {hiddenLiveCount > 0 ? (
-            <p className="panel-summary-note">Showing the first 20 live desks in spatial order.</p>
+            <p className="panel-summary-note">
+              Showing the first {settings.liveRosterLimit} live desks in spatial order.
+            </p>
           ) : null}
 
           {visibleLiveSessions.length === 0 ? (
@@ -864,7 +921,7 @@ export function App() {
             >
               {historyLoading
                 ? "Loading offline history..."
-                : `Show ${OFFLINE_PAGE_SIZE} more offline sessions (${hiddenOfflineCount} remaining)`}
+                : `Show ${settings.historyPageSize} more offline sessions (${hiddenOfflineCount} remaining)`}
             </Button>
           ) : null}
         </aside>

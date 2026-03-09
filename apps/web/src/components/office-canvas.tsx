@@ -19,6 +19,7 @@ interface OfficeCanvasProps {
   onHoveredSessionChange?: (sessionId: string | null) => void;
   onSelectedSessionChange?: (sessionId: string | null) => void;
   onSessionGeometryChange?: (geometries: Record<string, SessionGeometry>) => void;
+  reducedMotion?: boolean;
   selectedSessionId?: string | null;
   sessions: OfficeRenderSession[];
 }
@@ -416,6 +417,7 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     [focusedSessionId, props.sessions],
   );
   const deskBadgeMap = useMemo(() => createDeskBadgeMap(props.layout), [props.layout]);
+  const motionEnabled = !prefersReducedMotion && !props.reducedMotion;
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -564,7 +566,7 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
                     y: desk.y * props.layout.tileSize,
                   },
                   now,
-                  !prefersReducedMotion,
+                  motionEnabled,
                 ).badgePulse
               : 0,
           isBlocked: occupant?.isBlocked ?? false,
@@ -579,7 +581,7 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
           hasFocusedSession,
           isFocused: slot.renderSession.session.sessionId === focusedSessionId,
           isSelected: slot.renderSession.session.sessionId === props.selectedSessionId,
-          motionEnabled: !prefersReducedMotion,
+          motionEnabled,
           now,
         });
       }
@@ -608,7 +610,7 @@ export function OfficeCanvas(props: OfficeCanvasProps) {
     deskBadgeMap,
     focusedSessionId,
     hasFocusedSession,
-    prefersReducedMotion,
+    motionEnabled,
     props.lastMutationAt,
     props.layout,
     props.selectedSessionId,

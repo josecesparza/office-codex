@@ -15,6 +15,7 @@ interface SessionCollectionPayload {
 }
 
 interface LoadHistoryOptions {
+  limit?: number;
   reset?: boolean;
 }
 
@@ -36,9 +37,9 @@ export function useOfficeData(): UseOfficeDataResult {
 
   const loadMoreHistory = useCallback(
     async (options: LoadHistoryOptions = {}): Promise<void> => {
-      const { historySessions } = useOfficeStore.getState();
+      const { historySessions, settings } = useOfficeStore.getState();
       const query = new URLSearchParams({
-        limit: "20",
+        limit: String(options.limit ?? settings.historyPageSize),
         scope: "history",
       });
 

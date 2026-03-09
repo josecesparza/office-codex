@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentSession } from "@office-codex/core";
 import type { AgentEvent, AgentSession } from "@office-codex/core";
 
+import { DEFAULT_OFFICE_UI_SETTINGS } from "./office-settings";
 import { type EventEnvelope, useOfficeStore } from "./office-store";
 
 function createSession(sessionId: string, options: Partial<AgentSession> = {}): AgentSession {
@@ -44,9 +45,14 @@ beforeEach(() => {
     lastMutationAt: 0,
     layout: null,
     liveSessions: [],
+    settings: DEFAULT_OFFICE_UI_SETTINGS,
     sessionMeta: null,
     sessions: [],
   });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("office-store", () => {
@@ -219,5 +225,47 @@ describe("office-store", () => {
         trackedCount: 1,
       }),
     );
+  });
+
+  it("hydrates, updates and resets persisted ui settings", () => {
+    const localStorageMock = {
+      getItem() {
+        return JSON.stringify({
+          historyPageSize: 50,
+          liveRosterLimit: 12,
+          reducedMotion: true,
+          showOfflineHistoryByDefault: true,
+          showOfficeTooltips: false,
+        });
+      },
+      setItem: vi.fn(),
+    };
+
+    vi.stubGlobal("localStorage", localStorageMock);
+
+    useOfficeStore.getState().hydrateSettings();
+    expect(useOfficeStore.getState().settings).toEqual({
+      historyPageSize: 50,
+      liveRosterLimit: 12,
+      reducedMotion: true,
+      showOfflineHistoryByDefault: true,
+      showOfficeTooltips: false,
+    });
+
+    useOfficeStore.getState().updateSettings({
+      liveRosterLimit: 40,
+      showOfficeTooltips: true,
+    });
+    expect(useOfficeStore.getState().settings).toEqual({
+      historyPageSize: 50,
+      liveRosterLimit: 40,
+      reducedMotion: true,
+      showOfflineHistoryByDefault: true,
+      showOfficeTooltips: true,
+    });
+
+    useOfficeStore.getState().resetSettings();
+    expect(useOfficeStore.getState().settings).toEqual(DEFAULT_OFFICE_UI_SETTINGS);
+    expect(localStorageMock.setItem).toHaveBeenCalled();
   });
 });

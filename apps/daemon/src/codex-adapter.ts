@@ -349,7 +349,7 @@ export async function startPassiveCodexAdapter(options: {
     }
   }
 
-  const watcher = chokidar.watch([sessionIndexPath, join(sessionsRoot, "**/*.jsonl")], {
+  const watcher = chokidar.watch([sessionIndexPath, sessionsRoot], {
     ignoreInitial: true,
     awaitWriteFinish: {
       stabilityThreshold: 200,
@@ -364,7 +364,7 @@ export async function startPassiveCodexAdapter(options: {
         return;
       }
 
-      if (extname(filePath) === ".jsonl") {
+      if (filePath.startsWith(sessionsRoot) && extname(filePath) === ".jsonl") {
         await handleChangedTranscript(filePath, store, cursorStore);
       }
     } catch (error) {

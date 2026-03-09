@@ -8,8 +8,8 @@
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
-    "dev": "tsx src/index.ts dashboard",
-    "start": "tsx src/index.ts dashboard",
+    "dev": "node --import tsx src/index.ts",
+    "start": "node --import tsx src/index.ts",
     "test": "vitest run --passWithNoTests",
     "check": "tsc -p tsconfig.json --noEmit"
   },

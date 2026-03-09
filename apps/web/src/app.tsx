@@ -81,7 +81,7 @@ function looksLikeMachineTitle(title: string, sessionId: string): boolean {
   return /^[0-9a-f]{8,}-[0-9a-f-]{8,}$/i.test(title);
 }
 
-function getTooltipIdentity(session: {
+function getSessionIdentity(session: {
   cwd: string;
   sessionId: string;
   title: string;
@@ -231,7 +231,7 @@ export function App() {
   const tooltipGeometry = hoveredSessionId ? sessionGeometries[hoveredSessionId] : null;
   const tooltipTarget =
     hoveredOfficeSession?.session.state === "offline" ? null : hoveredOfficeSession;
-  const tooltipIdentity = tooltipTarget ? getTooltipIdentity(tooltipTarget.session) : null;
+  const tooltipIdentity = tooltipTarget ? getSessionIdentity(tooltipTarget.session) : null;
 
   useLayoutEffect(() => {
     const workspace = workspaceRef.current;
@@ -462,6 +462,7 @@ export function App() {
                 const { accentColor, deskBadge, isBlocked, session, variant } = renderSession;
                 const isSelected = selectedSessionId === session.sessionId;
                 const isLinked = !selectedSessionId && linkedSessionId === session.sessionId;
+                const sessionIdentity = getSessionIdentity(session);
 
                 return (
                   <div
@@ -497,8 +498,8 @@ export function App() {
                           />
                         </div>
                         <div>
-                          <h3>{session.title || session.sessionId}</h3>
-                          <p>{basename(session.cwd)}</p>
+                          <h3>{sessionIdentity.primary}</h3>
+                          <p>{sessionIdentity.secondary}</p>
                         </div>
                       </div>
                       <span className={`badge badge-${session.state}`}>
@@ -542,6 +543,7 @@ export function App() {
               <div className="session-list">
                 {visibleOfflineSessions.map((session) => {
                   const accentColor = getSessionAccent(session.sessionId);
+                  const sessionIdentity = getSessionIdentity(session);
 
                   return (
                     <article
@@ -571,8 +573,8 @@ export function App() {
                             />
                           </div>
                           <div>
-                            <h3>{session.title || session.sessionId}</h3>
-                            <p>{basename(session.cwd)}</p>
+                            <h3>{sessionIdentity.primary}</h3>
+                            <p>{sessionIdentity.secondary}</p>
                           </div>
                         </div>
                         <span className={`badge badge-${session.state}`}>

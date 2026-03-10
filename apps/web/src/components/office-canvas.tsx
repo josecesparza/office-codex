@@ -415,6 +415,12 @@ function drawAgent(
     drawBadge(ctx, x + 14, y - 2, "#f97316", animation.badgePulse);
   }
 
+  if (session.state === "permission_needed") {
+    drawBadge(ctx, x + 14, y - 2, "#dc2626", animation.badgePulse);
+    ctx.fillStyle = "#7f1d1d";
+    ctx.fillRect(x + 1, y + 18, 15, 2);
+  }
+
   if (session.state === "error") {
     drawBadge(ctx, x + 14, y - 2, "#dc2626", animation.badgePulse);
   }

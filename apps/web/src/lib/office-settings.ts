@@ -89,10 +89,7 @@ export function sanitizeOfficeUiSettings(value: unknown): OfficeUiSettings {
       typeof candidate?.showOfficeTooltips === "boolean"
         ? candidate.showOfficeTooltips
         : DEFAULT_OFFICE_UI_SETTINGS.showOfficeTooltips,
-    tooltipDetailLevel: isAllowedString(
-      candidate?.tooltipDetailLevel,
-      TOOLTIP_DETAIL_LEVEL_OPTIONS,
-    )
+    tooltipDetailLevel: isAllowedString(candidate?.tooltipDetailLevel, TOOLTIP_DETAIL_LEVEL_OPTIONS)
       ? candidate.tooltipDetailLevel
       : DEFAULT_OFFICE_UI_SETTINGS.tooltipDetailLevel,
   };

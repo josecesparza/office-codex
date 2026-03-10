@@ -319,18 +319,22 @@ function seedFromEntry(
 ): SessionSeedPatch {
   if (entry.kind !== "session_meta") {
     return {
+      identityConfidence: "high",
       rolloutPath: filePath,
       sessionId,
+      stateSource: "transcript",
       updatedAt: entry.timestamp,
     };
   }
 
   return {
     cwd: entry.cwd,
+    identityConfidence: "high",
     rolloutPath: filePath,
     sessionId,
     source: entry.source,
     startedAt: entry.timestamp,
+    stateSource: "transcript",
     updatedAt: entry.timestamp,
   };
 }
@@ -388,9 +392,11 @@ async function ingestTranscriptContents(options: {
   options.store.upsertSeed({
     cwd: thread.cwd,
     gitBranch: thread.gitBranch,
+    identityConfidence: "high",
     sessionId: thread.id,
     source: thread.source,
     startedAt: thread.createdAt,
+    stateSource: "transcript",
     title: thread.title,
     tokensUsed: thread.tokensUsed,
     updatedAt: thread.updatedAt,
@@ -456,6 +462,7 @@ async function readSessionIndexBootstrap(
     }
 
     const patch: SessionSeedPatch = {
+      identityConfidence: "low",
       sessionId: parsed.id,
       updatedAt: parsed.updatedAt,
     };
@@ -487,6 +494,7 @@ async function handleChangedSessionIndex(
     }
 
     const patch: SessionSeedPatch = {
+      identityConfidence: "low",
       sessionId: parsed.id,
       updatedAt: parsed.updatedAt,
     };
@@ -566,7 +574,7 @@ function markHistoricalSeedsOffline(store: SessionStore, now: number, idleMs: nu
     }
 
     store.markOffline(session.sessionId, session.updatedAt, {
-      details: "bootstrap_seed",
+      reason: "archived",
       preserveUpdatedAt: true,
     });
   }
@@ -609,6 +617,7 @@ export async function startPassiveCodexAdapter(options: {
       store.upsertSeed({
         cwd: thread.cwd,
         gitBranch: thread.gitBranch,
+        identityConfidence: "medium",
         sessionId: thread.id,
         source: thread.source,
         startedAt: thread.createdAt,

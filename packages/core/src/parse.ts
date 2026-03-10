@@ -32,6 +32,17 @@ function getTimestamp(raw: z.infer<typeof rawTranscriptSchema>): string | null {
   return raw.timestamp ?? null;
 }
 
+function parseFunctionArguments(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function parseSessionIndexLine(line: string): SessionIndexRecord | null {
   const parsed = sessionIndexSchema.safeParse(parseJsonLine(line));
 
@@ -95,12 +106,23 @@ export function parseTranscriptLine(line: string): ParsedTranscriptEntry | null 
             typeof raw.payload.name === "string" &&
             typeof raw.payload.arguments === "string"
           ) {
+            const argumentsJson = parseFunctionArguments(raw.payload.arguments);
+
             return {
               kind: "function_call",
               timestamp,
               callId: raw.payload.call_id,
               name: raw.payload.name,
               arguments: raw.payload.arguments,
+              argumentsJson,
+              justification:
+                typeof argumentsJson?.justification === "string"
+                  ? argumentsJson.justification
+                  : null,
+              sandboxPermissions:
+                typeof argumentsJson?.sandbox_permissions === "string"
+                  ? argumentsJson.sandbox_permissions
+                  : null,
             };
           }
           return null;

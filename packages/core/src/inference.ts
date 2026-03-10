@@ -52,6 +52,20 @@ function transitionState(
   emitted.push(createEvent(session, "state_changed", timestamp));
 }
 
+function resetTurnOutcome(session: AgentSession): void {
+  session.lastTurnOutcome = null;
+  session.lastTurnOutcomeAt = null;
+}
+
+function setTurnOutcome(
+  session: AgentSession,
+  outcome: AgentSession["lastTurnOutcome"],
+  timestamp: string,
+): void {
+  session.lastTurnOutcome = outcome;
+  session.lastTurnOutcomeAt = timestamp;
+}
+
 function updateSubtasks(
   session: AgentSession,
   nextCount: number,
@@ -78,9 +92,10 @@ function clearCurrentTool(
 
   const finishedTool = session.currentTool;
   session.currentTool = null;
+  session.pendingApprovalJustification = null;
   emitted.push(createEvent(session, "tool_finished", timestamp, finishedTool));
 
-  if (session.state === "using_tool") {
+  if (session.state === "using_tool" || session.state === "permission_needed") {
     transitionState(session, fallbackState, timestamp, emitted);
   }
 }
@@ -91,25 +106,49 @@ export function applyTranscriptEntry(
 ): ApplyTranscriptEntryResult {
   const nextSession: AgentSession = { ...session };
   const emitted: AgentEvent[] = [];
+  nextSession.identityConfidence = "high";
 
   switch (entry.kind) {
     case "session_meta":
       nextSession.cwd = entry.cwd;
       nextSession.source = entry.source;
+      nextSession.identityConfidence = "high";
+      nextSession.stateSource = "transcript";
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
     case "task_started":
+      resetTurnOutcome(nextSession);
       updateSubtasks(nextSession, nextSession.activeSubtasks + 1, entry.timestamp, emitted);
+      nextSession.pendingApprovalJustification = null;
+      nextSession.stateSource = "transcript";
       transitionState(nextSession, "thinking", entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
     case "reasoning":
+      nextSession.stateSource = "transcript";
       transitionState(nextSession, "thinking", entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
     case "function_call":
       nextSession.currentTool = entry.name;
+      nextSession.stateSource = "transcript";
+      nextSession.pendingApprovalJustification =
+        entry.sandboxPermissions === "require_escalated" ? entry.justification : null;
       emitted.push(createEvent(nextSession, "tool_started", entry.timestamp, entry.name));
+
+      if (entry.sandboxPermissions === "require_escalated") {
+        transitionState(nextSession, "permission_needed", entry.timestamp, emitted);
+        emitted.push(
+          createEvent(
+            nextSession,
+            "permission_requested",
+            entry.timestamp,
+            entry.justification ?? entry.name,
+          ),
+        );
+        return finalizeUpdate(nextSession, entry.timestamp, emitted);
+      }
+
       transitionState(
         nextSession,
         entry.name === "request_user_input" ? "waiting_user" : "using_tool",
@@ -119,24 +158,32 @@ export function applyTranscriptEntry(
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
     case "function_call_output":
+      nextSession.stateSource = "transcript";
       clearCurrentTool(nextSession, entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
     case "message":
       if (entry.role === "assistant") {
+        nextSession.stateSource = "transcript";
         transitionState(nextSession, "responding", entry.timestamp, emitted);
       }
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
     case "agent_message":
+      nextSession.stateSource = "transcript";
       transitionState(nextSession, "responding", entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
     case "user_message":
+      resetTurnOutcome(nextSession);
+      nextSession.pendingApprovalJustification = null;
+      nextSession.stateSource = "transcript";
       transitionState(nextSession, "thinking", entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
     case "task_complete":
+      nextSession.stateSource = "transcript";
+      setTurnOutcome(nextSession, "completed", entry.timestamp);
       updateSubtasks(
         nextSession,
         Math.max(nextSession.activeSubtasks - 1, 0),
@@ -145,14 +192,18 @@ export function applyTranscriptEntry(
       );
       if (nextSession.state === "waiting_user") {
         clearCurrentTool(nextSession, entry.timestamp, emitted, "waiting_user");
+        emitted.push(createEvent(nextSession, "turn_completed", entry.timestamp));
         return finalizeUpdate(nextSession, entry.timestamp, emitted);
       }
 
       clearCurrentTool(nextSession, entry.timestamp, emitted, "inactive");
       transitionState(nextSession, "inactive", entry.timestamp, emitted);
+      emitted.push(createEvent(nextSession, "turn_completed", entry.timestamp));
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
     case "turn_aborted":
+      nextSession.stateSource = "transcript";
+      setTurnOutcome(nextSession, "cancelled", entry.timestamp);
       updateSubtasks(
         nextSession,
         Math.max(nextSession.activeSubtasks - 1, 0),
@@ -161,11 +212,15 @@ export function applyTranscriptEntry(
       );
       clearCurrentTool(nextSession, entry.timestamp, emitted, "inactive");
       transitionState(nextSession, "inactive", entry.timestamp, emitted);
+      emitted.push(createEvent(nextSession, "turn_cancelled", entry.timestamp));
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
     case "thread_rolled_back":
+      nextSession.stateSource = "transcript";
+      setTurnOutcome(nextSession, "rolled_back", entry.timestamp);
       clearCurrentTool(nextSession, entry.timestamp, emitted, "inactive");
       transitionState(nextSession, "inactive", entry.timestamp, emitted);
+      emitted.push(createEvent(nextSession, "turn_rolled_back", entry.timestamp));
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
   }
 

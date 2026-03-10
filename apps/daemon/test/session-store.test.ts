@@ -32,6 +32,7 @@ describe("SessionStore", () => {
     expect(session?.sessionId).toBe("session-basic");
     expect(session?.state).toBe("inactive");
     expect(session?.currentTool).toBeNull();
+    expect(session?.identityConfidence).toBe("high");
   });
 
   it("marks stale sessions as offline", () => {
@@ -49,6 +50,7 @@ describe("SessionStore", () => {
     store.markStaleSessionsOffline(Date.parse("2026-03-09T18:05:00.000Z"), 60_000);
 
     expect(store.get("session-idle")?.state).toBe("offline");
+    expect(store.get("session-idle")?.offlineReason).toBe("idle_timeout");
   });
 
   it("prefers hydrated human titles and keeps tokens used", () => {
@@ -156,5 +158,26 @@ describe("SessionStore", () => {
     expect(historyResult.sessions.map((session) => session.sessionId)).toEqual(["offline-1"]);
     expect(historyResult.meta.liveCount).toBe(1);
     expect(historyResult.meta.offlineCount).toBe(2);
+  });
+
+  it("does not let an older offline mark override newer transcript activity", () => {
+    const store = new SessionStore();
+
+    store.upsertSeed({
+      sessionId: "session-fresh",
+      title: "Fresh session",
+      cwd: "/workspace/demo",
+      source: "vscode",
+      rolloutPath: "/tmp/fresh.jsonl",
+      startedAt: "2026-03-09T18:00:00.000Z",
+      updatedAt: "2026-03-09T18:05:00.000Z",
+    });
+
+    store.markOffline("session-fresh", "2026-03-09T18:04:00.000Z", {
+      reason: "wrapper_exit",
+    });
+
+    expect(store.get("session-fresh")?.state).toBe("inactive");
+    expect(store.get("session-fresh")?.offlineReason).toBeNull();
   });
 });

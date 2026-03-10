@@ -4,19 +4,40 @@ export const AGENT_STATES = [
   "using_tool",
   "responding",
   "waiting_user",
+  "permission_needed",
   "offline",
   "error",
 ] as const;
 
 export type AgentState = (typeof AGENT_STATES)[number];
 
+export const CONFIDENCE_LEVELS = ["low", "medium", "high"] as const;
+
+export type ConfidenceLevel = (typeof CONFIDENCE_LEVELS)[number];
+
+export const AGENT_STATE_SOURCES = ["transcript", "wrapper", "timeout"] as const;
+
+export type AgentStateSource = (typeof AGENT_STATE_SOURCES)[number];
+
+export const AGENT_TURN_OUTCOMES = ["completed", "cancelled", "rolled_back"] as const;
+
+export type AgentTurnOutcome = (typeof AGENT_TURN_OUTCOMES)[number];
+
+export const OFFLINE_REASONS = ["wrapper_exit", "idle_timeout", "archived", "unknown"] as const;
+
+export type OfflineReason = (typeof OFFLINE_REASONS)[number];
+
 export const AGENT_EVENT_TYPES = [
   "session_discovered",
   "session_updated",
   "state_changed",
+  "permission_requested",
   "tool_started",
   "tool_finished",
   "subtasks_changed",
+  "turn_completed",
+  "turn_cancelled",
+  "turn_rolled_back",
   "session_exited",
 ] as const;
 
@@ -40,6 +61,14 @@ export interface AgentSession {
   activeSubtasks: number;
   currentTool: string | null;
   state: AgentState;
+  identityConfidence: ConfidenceLevel;
+  stateConfidence: ConfidenceLevel;
+  reliabilityHints: string[];
+  stateSource: AgentStateSource;
+  lastTurnOutcome: AgentTurnOutcome | null;
+  lastTurnOutcomeAt: string | null;
+  pendingApprovalJustification: string | null;
+  offlineReason: OfflineReason | null;
   lastEventAt: string;
   lastEventType: AgentEventType | null;
 }
@@ -55,6 +84,14 @@ export interface AgentSessionSeed {
   gitBranch?: string | null;
   tokensUsed?: number | null;
   seatId?: string | null;
+  identityConfidence?: ConfidenceLevel;
+  stateConfidence?: ConfidenceLevel;
+  reliabilityHints?: string[];
+  stateSource?: AgentStateSource;
+  lastTurnOutcome?: AgentTurnOutcome | null;
+  lastTurnOutcomeAt?: string | null;
+  pendingApprovalJustification?: string | null;
+  offlineReason?: OfflineReason | null;
 }
 
 export interface AgentEvent {
@@ -148,6 +185,9 @@ export interface FunctionCallEntry extends TranscriptBase {
   callId: string;
   name: string;
   arguments: string;
+  argumentsJson: Record<string, unknown> | null;
+  sandboxPermissions: string | null;
+  justification: string | null;
 }
 
 export interface FunctionCallOutputEntry extends TranscriptBase {

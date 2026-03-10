@@ -484,6 +484,15 @@ body {
   overflow-wrap: anywhere;
 }
 
+.hint-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  color: #6f6258;
+  font-size: 13px;
+}
+
 .drawer-section {
   display: grid;
   gap: 10px;
@@ -561,6 +570,10 @@ body {
 
 .timeline-dot-waiting_user {
   background: #f59e0b;
+}
+
+.timeline-dot-permission_needed {
+  background: #dc2626;
 }
 
 .timeline-dot-offline {
@@ -758,6 +771,13 @@ body {
   align-items: flex-start;
 }
 
+.session-card-status {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .session-card-identity {
   display: flex;
   align-items: center;
@@ -852,6 +872,28 @@ body {
   overflow-wrap: anywhere;
 }
 
+.session-reliability {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-family: "Menlo", "Monaco", monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.session-reliability-medium {
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
+}
+
+.session-reliability-low {
+  background: rgba(254, 226, 226, 0.92);
+  color: #991b1b;
+}
+
 .session-card dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -905,6 +947,10 @@ body {
 
 .badge-waiting_user {
   background: #fed7aa;
+}
+
+.badge-permission_needed {
+  background: #fecaca;
 }
 
 .badge-offline {

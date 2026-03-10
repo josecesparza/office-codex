@@ -5,6 +5,7 @@ import {
   type AgentSession,
   applyTranscriptEntry,
   createAgentSession,
+  materializeAgentSession,
 } from "@office-codex/core";
 import type { AgentSessionSeed, ParsedTranscriptEntry } from "@office-codex/core";
 
@@ -23,6 +24,14 @@ export interface SessionSeedPatch {
   gitBranch?: string | null;
   tokensUsed?: number | null;
   seatId?: string | null;
+  identityConfidence?: AgentSession["identityConfidence"];
+  stateConfidence?: AgentSession["stateConfidence"];
+  reliabilityHints?: string[];
+  stateSource?: AgentSession["stateSource"];
+  lastTurnOutcome?: AgentSession["lastTurnOutcome"];
+  lastTurnOutcomeAt?: string | null;
+  pendingApprovalJustification?: string | null;
+  offlineReason?: AgentSession["offlineReason"];
 }
 
 export interface SessionQuery {
@@ -50,22 +59,65 @@ export interface SessionStoreOptions {
 }
 
 interface MarkOfflineOptions {
-  details?: string | null;
+  reason?: AgentSession["offlineReason"];
   preserveUpdatedAt?: boolean;
 }
 
+const confidenceRank: Record<AgentSession["identityConfidence"], number> = {
+  high: 2,
+  low: 0,
+  medium: 1,
+};
+
+function maxConfidence(
+  left: AgentSession["identityConfidence"],
+  right: AgentSession["identityConfidence"],
+): AgentSession["identityConfidence"] {
+  return confidenceRank[left] >= confidenceRank[right] ? left : right;
+}
+
+function minConfidence(
+  left: AgentSession["stateConfidence"],
+  right: AgentSession["stateConfidence"],
+): AgentSession["stateConfidence"] {
+  return confidenceRank[left] <= confidenceRank[right] ? left : right;
+}
+
 function mergeSessionSeed(session: AgentSession, seed: SessionSeedPatch): AgentSession {
+  const transcriptMetadataWins =
+    seed.source === "wrapper" &&
+    session.rolloutPath.trim().length > 0 &&
+    session.source !== "wrapper";
+
   return {
     ...session,
-    source: seed.source ?? session.source,
+    source: transcriptMetadataWins ? session.source : (seed.source ?? session.source),
     title: seed.title !== undefined ? pickPreferredTitle(session.title, seed.title) : session.title,
-    cwd: seed.cwd ?? session.cwd,
+    cwd: transcriptMetadataWins ? session.cwd : (seed.cwd ?? session.cwd),
     rolloutPath: seed.rolloutPath ?? session.rolloutPath,
     startedAt: seed.startedAt ?? session.startedAt,
     updatedAt: seed.updatedAt ?? session.updatedAt,
     gitBranch: seed.gitBranch ?? session.gitBranch,
     tokensUsed: seed.tokensUsed ?? session.tokensUsed,
     seatId: seed.seatId ?? session.seatId,
+    identityConfidence:
+      seed.identityConfidence !== undefined
+        ? maxConfidence(session.identityConfidence, seed.identityConfidence)
+        : session.identityConfidence,
+    stateConfidence:
+      seed.stateConfidence !== undefined
+        ? minConfidence(session.stateConfidence, seed.stateConfidence)
+        : session.stateConfidence,
+    reliabilityHints: seed.reliabilityHints ?? session.reliabilityHints,
+    stateSource:
+      transcriptMetadataWins && seed.stateSource === "wrapper"
+        ? session.stateSource
+        : (seed.stateSource ?? session.stateSource),
+    lastTurnOutcome: seed.lastTurnOutcome ?? session.lastTurnOutcome,
+    lastTurnOutcomeAt: seed.lastTurnOutcomeAt ?? session.lastTurnOutcomeAt,
+    pendingApprovalJustification:
+      seed.pendingApprovalJustification ?? session.pendingApprovalJustification,
+    offlineReason: seed.offlineReason ?? session.offlineReason,
   };
 }
 
@@ -105,6 +157,10 @@ export class SessionStore {
     this.#pruneOfflineHistory();
   }
 
+  #materialize(session: AgentSession): AgentSession {
+    return materializeAgentSession(session);
+  }
+
   upsertSeed(seed: SessionSeedPatch): AgentSession {
     const current = this.#sessions.get(seed.sessionId);
 
@@ -132,6 +188,38 @@ export class SessionStore {
 
       if (seed.seatId !== undefined) {
         createSeed.seatId = seed.seatId;
+      }
+
+      if (seed.identityConfidence !== undefined) {
+        createSeed.identityConfidence = seed.identityConfidence;
+      }
+
+      if (seed.stateConfidence !== undefined) {
+        createSeed.stateConfidence = seed.stateConfidence;
+      }
+
+      if (seed.reliabilityHints !== undefined) {
+        createSeed.reliabilityHints = seed.reliabilityHints;
+      }
+
+      if (seed.stateSource !== undefined) {
+        createSeed.stateSource = seed.stateSource;
+      }
+
+      if (seed.lastTurnOutcome !== undefined) {
+        createSeed.lastTurnOutcome = seed.lastTurnOutcome;
+      }
+
+      if (seed.lastTurnOutcomeAt !== undefined) {
+        createSeed.lastTurnOutcomeAt = seed.lastTurnOutcomeAt;
+      }
+
+      if (seed.pendingApprovalJustification !== undefined) {
+        createSeed.pendingApprovalJustification = seed.pendingApprovalJustification;
+      }
+
+      if (seed.offlineReason !== undefined) {
+        createSeed.offlineReason = seed.offlineReason;
       }
 
       const created = createAgentSession({
@@ -169,9 +257,9 @@ export class SessionStore {
   }
 
   list(): AgentSession[] {
-    return [...this.#sessions.values()].sort((left, right) =>
-      right.updatedAt.localeCompare(left.updatedAt),
-    );
+    return [...this.#sessions.values()]
+      .map((session) => this.#materialize(session))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
   listLive(): AgentSession[] {
@@ -243,7 +331,8 @@ export class SessionStore {
   }
 
   get(sessionId: string): AgentSession | undefined {
-    return this.#sessions.get(sessionId);
+    const session = this.#sessions.get(sessionId);
+    return session ? this.#materialize(session) : undefined;
   }
 
   markOffline(
@@ -257,12 +346,28 @@ export class SessionStore {
       return;
     }
 
-    const details = options.details ?? "idle_timeout";
+    const reason = options.reason ?? "unknown";
+    const updatedAt = Date.parse(session.updatedAt);
+    const offlineAt = Date.parse(timestamp);
+
+    if (Number.isFinite(updatedAt) && Number.isFinite(offlineAt) && offlineAt < updatedAt) {
+      return;
+    }
+
+    const stateSource =
+      reason === "wrapper_exit"
+        ? "wrapper"
+        : reason === "idle_timeout"
+          ? "timeout"
+          : session.stateSource;
     const next: AgentSession = {
       ...session,
       state: "offline",
       currentTool: null,
+      pendingApprovalJustification: null,
       updatedAt: options.preserveUpdatedAt ? session.updatedAt : timestamp,
+      stateSource,
+      offlineReason: reason,
       lastEventAt: timestamp,
       lastEventType: "session_exited",
     };
@@ -275,7 +380,7 @@ export class SessionStore {
       state: next.state,
       currentTool: next.currentTool,
       activeSubtasks: next.activeSubtasks,
-      details,
+      details: reason,
     });
     this.emit({
       type: "session_exited",
@@ -284,7 +389,7 @@ export class SessionStore {
       state: next.state,
       currentTool: next.currentTool,
       activeSubtasks: next.activeSubtasks,
-      details,
+      details: reason,
     });
     this.emit({
       type: "session_updated",
@@ -306,7 +411,9 @@ export class SessionStore {
       const updatedAt = Date.parse(session.updatedAt);
 
       if (Number.isFinite(updatedAt) && now - updatedAt >= idleMs) {
-        this.markOffline(session.sessionId, new Date(now).toISOString());
+        this.markOffline(session.sessionId, new Date(now).toISOString(), {
+          reason: "idle_timeout",
+        });
       }
     }
   }

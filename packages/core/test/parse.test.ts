@@ -67,4 +67,23 @@ describe("parseTranscriptLines", () => {
       "thread_rolled_back",
     ]);
   });
+
+  it("parses approval metadata from function call arguments", () => {
+    const entries = parseTranscriptLines(`
+{"timestamp":"2026-03-09T21:05:39.121Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\\"cmd\\":\\"node --import tsx apps/cli/src/index.ts dashboard\\",\\"sandbox_permissions\\":\\"require_escalated\\",\\"justification\\":\\"Do you want to allow me to start the local daemon?\\"}","call_id":"call-approval"}}
+    `);
+
+    expect(entries).toEqual([
+      expect.objectContaining({
+        argumentsJson: {
+          cmd: "node --import tsx apps/cli/src/index.ts dashboard",
+          justification: "Do you want to allow me to start the local daemon?",
+          sandbox_permissions: "require_escalated",
+        },
+        justification: "Do you want to allow me to start the local daemon?",
+        kind: "function_call",
+        sandboxPermissions: "require_escalated",
+      }),
+    ]);
+  });
 });

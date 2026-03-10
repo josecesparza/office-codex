@@ -31,6 +31,7 @@ import { useOfficeData } from "./lib/use-office-data";
 
 const CONNECTOR_MIN_WIDTH = 1080;
 const TOOLTIP_WIDTH = 276;
+const RECENT_OUTCOME_MS = 300_000;
 
 const stateLabels: Record<string, string> = {
   inactive: "Ready",
@@ -38,9 +39,12 @@ const stateLabels: Record<string, string> = {
   using_tool: "Using tool",
   responding: "Responding",
   waiting_user: "Waiting",
+  permission_needed: "Permission needed",
   offline: "Offline",
   error: "Error",
 };
+
+const recentOutcomeEventTypes = new Set(["turn_completed", "turn_cancelled", "turn_rolled_back"]);
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -147,6 +151,53 @@ function getRosterIdentity(
     primary: `${repoName} / ${options.deskBadge ?? shortId}`,
     secondary: branch ? `${branch} · Session ${shortId}` : `Session ${shortId}`,
   };
+}
+
+function getReliabilityIndicator(session: {
+  identityConfidence: "high" | "medium" | "low";
+  stateConfidence: "high" | "medium" | "low";
+}) {
+  if (session.identityConfidence === "low" || session.stateConfidence === "low") {
+    return {
+      description: "Some identity or state signals are currently low confidence.",
+      label: "Low confidence",
+      tone: "low" as const,
+    };
+  }
+
+  if (session.stateConfidence === "medium") {
+    return {
+      description: "The live state signal is starting to age.",
+      label: "Signal aging",
+      tone: "medium" as const,
+    };
+  }
+
+  if (session.identityConfidence === "medium") {
+    return {
+      description: "This session is currently matched through passive metadata or wrapper hints.",
+      label: "Passive match",
+      tone: "medium" as const,
+    };
+  }
+
+  return null;
+}
+
+function filterRecentOutcomeActivity<
+  T extends {
+    timestamp: string;
+    type: string;
+  },
+>(items: T[], now: number): T[] {
+  return items.filter((item) => {
+    if (!recentOutcomeEventTypes.has(item.type)) {
+      return true;
+    }
+
+    const timestamp = Date.parse(item.timestamp);
+    return Number.isFinite(timestamp) && now - timestamp <= RECENT_OUTCOME_MS;
+  });
 }
 
 export function App() {
@@ -336,6 +387,10 @@ export function App() {
       : hoveredOfficeSession;
   const tooltipIdentity = tooltipTarget ? getTooltipIdentity(tooltipTarget.session) : null;
   const selectedActivity = selectedSessionId ? (activityBySession[selectedSessionId] ?? []) : [];
+  const visibleSelectedActivity = useMemo(
+    () => filterRecentOutcomeActivity(selectedActivity, now),
+    [now, selectedActivity],
+  );
   const selectedRecentTools = useMemo(
     () =>
       selectedActivity
@@ -345,6 +400,9 @@ export function App() {
         .slice(0, 4),
     [selectedActivity],
   );
+  const selectedReliabilityIndicator = selectedOfficeSession
+    ? getReliabilityIndicator(selectedOfficeSession.session)
+    : null;
 
   useLayoutEffect(() => {
     const workspace = workspaceRef.current;
@@ -642,7 +700,7 @@ export function App() {
                         }).primary
                       }
                     </h3>
-                    <p>{selectedOfficeSession.session.state.replaceAll("_", " ")}</p>
+                    <p>{stateLabels[selectedOfficeSession.session.state]}</p>
                   </div>
                 </div>
                 <Button
@@ -680,7 +738,37 @@ export function App() {
                   <dt>Subtasks</dt>
                   <dd>{selectedOfficeSession.session.activeSubtasks}</dd>
                 </div>
+                <div>
+                  <dt>Reliability</dt>
+                  <dd>{selectedReliabilityIndicator?.label ?? "High confidence"}</dd>
+                </div>
+                <div>
+                  <dt>Signal source</dt>
+                  <dd>{selectedOfficeSession.session.stateSource}</dd>
+                </div>
+                {selectedOfficeSession.session.state === "permission_needed" ? (
+                  <div>
+                    <dt>Approval</dt>
+                    <dd>
+                      {selectedOfficeSession.session.pendingApprovalJustification ??
+                        "Needs your approval"}
+                    </dd>
+                  </div>
+                ) : null}
               </dl>
+
+              {selectedOfficeSession.session.reliabilityHints.length > 0 ? (
+                <div className="drawer-section">
+                  <div className="drawer-section-head">
+                    <h4>Reliability</h4>
+                  </div>
+                  <ul className="hint-list">
+                    {selectedOfficeSession.session.reliabilityHints.map((hint) => (
+                      <li key={hint}>{hint}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
               <div className="drawer-section">
                 <div className="drawer-section-head">
@@ -703,11 +791,11 @@ export function App() {
                 <div className="drawer-section-head">
                   <h4>Activity timeline</h4>
                 </div>
-                {selectedActivity.length === 0 ? (
+                {visibleSelectedActivity.length === 0 ? (
                   <p className="insight-empty">No activity recorded yet.</p>
                 ) : (
                   <ol className="timeline-list">
-                    {selectedActivity.slice(0, 6).map((item) => (
+                    {visibleSelectedActivity.slice(0, 6).map((item) => (
                       <li key={item.id}>
                         <span className={`timeline-dot timeline-dot-${item.state}`} />
                         <div>
@@ -772,6 +860,7 @@ export function App() {
                 const isSelected = selectedSessionId === session.sessionId;
                 const isLinked = !selectedSessionId && linkedSessionId === session.sessionId;
                 const sessionIdentity = getRosterIdentity(session, { deskBadge });
+                const reliabilityIndicator = getReliabilityIndicator(session);
 
                 return (
                   <div
@@ -809,11 +898,21 @@ export function App() {
                         <div>
                           <h3>{sessionIdentity.primary}</h3>
                           <p>{sessionIdentity.secondary}</p>
+                          {reliabilityIndicator ? (
+                            <span
+                              className={`session-reliability session-reliability-${reliabilityIndicator.tone}`}
+                              title={reliabilityIndicator.description}
+                            >
+                              {reliabilityIndicator.label}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
-                      <Badge className={`badge badge-${session.state}`} variant="outline">
-                        {stateLabels[session.state]}
-                      </Badge>
+                      <div className="session-card-status">
+                        <Badge className={`badge badge-${session.state}`} variant="outline">
+                          {stateLabels[session.state]}
+                        </Badge>
+                      </div>
                     </div>
                     <dl>
                       <div>

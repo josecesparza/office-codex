@@ -138,6 +138,31 @@ describe("office-ui", () => {
     ]);
   });
 
+  it("treats permission_needed as blocked critical attention", () => {
+    const now = Date.parse("2026-03-09T09:10:00.000Z");
+    const permissionNeeded = createSession("permission", {
+      pendingApprovalJustification: "Do you want to allow the daemon to start?",
+      state: "permission_needed",
+      updatedAt: "2026-03-09T09:09:58.000Z",
+    });
+    const renderSessions = buildLiveOfficeSessions(
+      [permissionNeeded],
+      defaultOfficeLayout,
+      {
+        permission: "desk-01",
+      },
+      now,
+    );
+
+    expect(renderSessions[0]?.isBlocked).toBe(true);
+    expect(getAttentionItems(renderSessions, now)).toEqual([
+      expect.objectContaining({
+        reason: "Do you want to allow the daemon to start?",
+        severity: "critical",
+      }),
+    ]);
+  });
+
   it("includes fresh waiting sessions as awaiting response", () => {
     const now = Date.parse("2026-03-09T09:10:00.000Z");
     const waiting = createSession("waiting", {

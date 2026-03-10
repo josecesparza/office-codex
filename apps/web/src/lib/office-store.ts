@@ -181,8 +181,16 @@ function describeActivityLabel(item: {
       return `Finished ${item.details ?? "tool"}`;
     case "state_changed":
       return `State -> ${item.state.replaceAll("_", " ")}`;
+    case "permission_requested":
+      return item.details ? `Permission needed: ${item.details}` : "Permission needed";
     case "subtasks_changed":
       return `Subtasks: ${item.activeSubtasks}`;
+    case "turn_completed":
+      return "Turn completed";
+    case "turn_cancelled":
+      return "Turn cancelled";
+    case "turn_rolled_back":
+      return "Turn rolled back";
     case "session_discovered":
       return "Session discovered";
     case "session_exited":

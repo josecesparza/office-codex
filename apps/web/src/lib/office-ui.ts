@@ -238,6 +238,10 @@ export function isBlockedSession(session: AgentSession, now: number): boolean {
     return true;
   }
 
+  if (session.state === "permission_needed") {
+    return true;
+  }
+
   if (session.state !== "waiting_user") {
     return false;
   }
@@ -322,6 +326,15 @@ export function getAttentionItems(
     if (renderSession.session.state === "error") {
       items.push({
         reason: "Agent error",
+        session: renderSession,
+        severity: "critical",
+      });
+      continue;
+    }
+
+    if (renderSession.session.state === "permission_needed") {
+      items.push({
+        reason: renderSession.session.pendingApprovalJustification ?? "Permission needed",
         session: renderSession,
         severity: "critical",
       });

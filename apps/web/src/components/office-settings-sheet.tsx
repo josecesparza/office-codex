@@ -2,8 +2,8 @@ import {
   HISTORY_PAGE_SIZE_OPTIONS,
   LIVE_ROSTER_LIMIT_OPTIONS,
   OFFICE_UI_SETTINGS_STORAGE_KEY,
-  TOOLTIP_DETAIL_LEVEL_OPTIONS,
   type OfficeUiSettings,
+  TOOLTIP_DETAIL_LEVEL_OPTIONS,
 } from "../lib/office-settings";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
@@ -264,7 +264,6 @@ export function OfficeSettingsSheet(props: OfficeSettingsSheetProps) {
                 }
               />
             </div>
-
           </Card>
 
           <SheetFooter>

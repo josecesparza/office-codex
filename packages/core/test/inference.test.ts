@@ -3,7 +3,12 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { parseTranscriptLines, reduceTranscriptEntries } from "../src";
+import {
+  createAgentSession,
+  materializeAgentSession,
+  parseTranscriptLines,
+  reduceTranscriptEntries,
+} from "../src";
 
 function fixture(name: string): string {
   return readFileSync(resolve(import.meta.dirname, "fixtures", name), "utf8");
@@ -26,10 +31,12 @@ describe("reduceTranscriptEntries", () => {
     expect(result.session.state).toBe("inactive");
     expect(result.session.currentTool).toBeNull();
     expect(result.session.activeSubtasks).toBe(0);
+    expect(result.session.lastTurnOutcome).toBe("completed");
 
     expect(result.emitted.map((event) => event.type)).toContain("tool_started");
     expect(result.emitted.map((event) => event.type)).toContain("tool_finished");
     expect(result.emitted.map((event) => event.type)).toContain("subtasks_changed");
+    expect(result.emitted.map((event) => event.type)).toContain("turn_completed");
   });
 
   it("keeps the session in waiting_user after request_user_input", () => {
@@ -118,5 +125,55 @@ describe("reduceTranscriptEntries", () => {
 
     expect(result.session.state).toBe("inactive");
     expect(result.session.activeSubtasks).toBe(0);
+    expect(result.session.lastTurnOutcome).toBe("rolled_back");
+    expect(result.emitted.map((event) => event.type)).toContain("turn_cancelled");
+    expect(result.emitted.map((event) => event.type)).toContain("turn_rolled_back");
+  });
+
+  it("detects permission_needed from approval-requiring tool calls", () => {
+    const result = reduceTranscriptEntries(
+      {
+        sessionId: "session-permission",
+        source: "vscode",
+        title: "Office Codex",
+        cwd: "/workspace/demo",
+        rolloutPath: "/tmp/permission-session.jsonl",
+        startedAt: "2026-03-09T21:05:39.000Z",
+      },
+      parseTranscriptLines(`
+{"timestamp":"2026-03-09T21:05:39.000Z","type":"session_meta","payload":{"id":"session-permission","timestamp":"2026-03-09T21:05:39.000Z","cwd":"/workspace/demo","originator":"Codex Desktop","cli_version":"0.108.0-alpha.12","source":"vscode","model_provider":"openai"}}
+{"timestamp":"2026-03-09T21:05:40.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-permission","collaboration_mode_kind":"default"}}
+{"timestamp":"2026-03-09T21:05:41.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\\"cmd\\":\\"node --import tsx apps/cli/src/index.ts dashboard\\",\\"sandbox_permissions\\":\\"require_escalated\\",\\"justification\\":\\"Do you want to allow me to start the local daemon?\\"}","call_id":"call-permission"}}
+      `),
+    );
+
+    expect(result.session.state).toBe("permission_needed");
+    expect(result.session.currentTool).toBe("exec_command");
+    expect(result.session.pendingApprovalJustification).toBe(
+      "Do you want to allow me to start the local daemon?",
+    );
+    expect(result.emitted.map((event) => event.type)).toContain("permission_requested");
+  });
+
+  it("degrades confidence for stale active states without changing the visible state", () => {
+    const session = materializeAgentSession(
+      {
+        ...createAgentSession({
+          cwd: "/workspace/demo",
+          rolloutPath: "/tmp/thinking.jsonl",
+          sessionId: "session-stale",
+          source: "vscode",
+          startedAt: "2026-03-09T19:00:00.000Z",
+          title: "Office Codex",
+          updatedAt: "2026-03-09T19:00:00.000Z",
+        }),
+        state: "thinking",
+      },
+      Date.parse("2026-03-09T19:02:30.000Z"),
+    );
+
+    expect(session.state).toBe("thinking");
+    expect(session.stateConfidence).toBe("low");
+    expect(session.reliabilityHints).toContain("Live state signal is stale.");
   });
 });

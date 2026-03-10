@@ -62,8 +62,10 @@ export class WrapperEventHandler {
         this.#store.upsertSeed({
           sessionId: event.sessionId,
           cwd: event.cwd,
+          identityConfidence: "medium",
           source: "wrapper",
           startedAt: event.startedAt,
+          stateSource: "wrapper",
           updatedAt: event.startedAt,
         });
         return;
@@ -74,7 +76,9 @@ export class WrapperEventHandler {
         const sessionId = event.sessionId ?? existing?.sessionId ?? null;
 
         if (sessionId) {
-          this.#store.markOffline(sessionId, event.exitedAt);
+          this.#store.markOffline(sessionId, event.exitedAt, {
+            reason: "wrapper_exit",
+          });
         }
 
         this.#hintsByPid.delete(event.pid);

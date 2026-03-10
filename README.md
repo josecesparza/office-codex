@@ -155,6 +155,80 @@ OFFICE_CODEX_CHATGPT_ORIGIN=https://chatgpt.com
 OFFICE_CODEX_ACCOUNT_REFRESH_MS=60000
 ```
 
+## Roadmap
+
+Office Codex should optimize for one job first: helping a programmer supervise multiple Codex
+agents with low cognitive load. The roadmap below prioritizes attention management, state clarity,
+and project coordination over visual customization.
+
+### Immediate priorities
+
+- **Session and state reliability**
+  - make session-to-agent mapping more robust
+  - improve status detection for real user-facing states such as `Thinking`, `Using tool`,
+    `Waiting for you`, `Ready`, `Blocked`, `Cancelled`, and `Offline`
+  - detect important transitions reliably: permission needed, cancel, rollback, turn completion,
+    long-running tool calls, and real user input waits
+
+- **Attention-first workflow**
+  - evolve `Attention inbox` into the main operational surface for multi-agent supervision
+  - prioritize sessions that need action now: waiting for input, permission needed, errors, stuck
+    agents, and recently finished work
+  - show human reasons instead of only labels, for example `Needs answer`, `Needs approval`, or
+    `No progress in 4m`
+
+- **Clearer state model for humans**
+  - keep the primary state focused on the visible conversation, not on internal subtasks
+  - show parallel work as a secondary signal instead of turning a finished parent session back into
+    `Thinking`
+  - reduce ambiguous or misleading states so the user can trust the board at a glance
+
+### Next phase
+
+- **Actionable top metrics and filters**
+  - turn the health cards into filters so the user can click `Waiting`, `Blocked`, or `Using tools`
+    and focus the office and roster immediately
+  - separate `Live` from `Busy` so open sessions are not confused with sessions actively working
+
+- **Recently changed and recent outcomes**
+  - highlight sessions whose state changed since the user's last glance
+  - add a `Recently finished` queue so completed work does not disappear into `Ready`
+  - make it easy to answer the question: “what changed while I was looking elsewhere?”
+
+- **Stuck detection and escalation**
+  - detect long periods of `Thinking` or `Using tool` with no progress
+  - promote those sessions into the inbox with a clear reason and duration
+  - help users notice agents that silently stopped being productive
+
+### Project coordination
+
+- **Desks as projects or directories**
+  - let desks represent a repo, directory, or worktree instead of being only visual slots
+  - make it obvious which agents are working on the same codebase
+  - support assigning sessions to desks/projects intentionally, not only automatically
+
+- **Git worktree awareness**
+  - surface when several agents are working on the same repo without isolation
+  - highlight safer setups that use separate worktrees for parallel implementation
+  - reduce collisions and confusion when many agents edit related code at once
+
+- **Agent teams and parent-child relationships**
+  - visualize coordination between a main agent and its subtasks or helper agents
+  - show which sessions are independent and which belong to the same effort
+  - keep those relationships readable without turning the office into noise
+
+### Later
+
+- **Agent definitions before launch**
+  - define reusable agent profiles such as `Reviewer`, `Debugger`, `Implementer`, or `Researcher`
+  - attach a role, name, project context, and expected workflow before starting the session
+  - make the roster easier to scan when many similar agents are running
+
+- **Useful notifications**
+  - notify only for events that change what the user should do: waiting for input, approval needed,
+    blocked, stuck, or finished
+  - avoid noisy notifications for every minor state transition
+
 ## Privacy
 
 Office Codex does not expose prompt or response bodies through the dashboard API. The daemon only

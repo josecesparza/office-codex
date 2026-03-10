@@ -161,14 +161,18 @@ Office Codex should optimize for one job first: helping a programmer supervise m
 agents with low cognitive load. The roadmap below prioritizes attention management, state clarity,
 and project coordination over visual customization.
 
-### Immediate priorities
+### Recently shipped
 
 - **Session and state reliability**
-  - make session-to-agent mapping more robust
-  - improve status detection for real user-facing states such as `Thinking`, `Using tool`,
-    `Waiting for you`, `Ready`, `Blocked`, `Cancelled`, and `Offline`
-  - detect important transitions reliably: permission needed, cancel, rollback, turn completion,
-    long-running tool calls, and real user input waits
+  - unify `transcripts + wrapper hints + SQLite/session_index` into one canonical session per
+    `sessionId`
+  - detect real user-facing states such as `Thinking`, `Using tool`, `Waiting for you`, `Ready`,
+    `Permission needed`, `Offline`, and `Error`
+  - treat cancellation as a recent outcome instead of a misleading persistent state
+  - surface low-confidence session/state signals with subtle reliability hints instead of hiding
+    weak matches
+
+### Immediate priorities
 
 - **Attention-first workflow**
   - evolve `Attention inbox` into the main operational surface for multi-agent supervision
@@ -176,14 +180,6 @@ and project coordination over visual customization.
     agents, and recently finished work
   - show human reasons instead of only labels, for example `Needs answer`, `Needs approval`, or
     `No progress in 4m`
-
-- **Clearer state model for humans**
-  - keep the primary state focused on the visible conversation, not on internal subtasks
-  - show parallel work as a secondary signal instead of turning a finished parent session back into
-    `Thinking`
-  - reduce ambiguous or misleading states so the user can trust the board at a glance
-
-### Next phase
 
 - **Actionable top metrics and filters**
   - turn the health cards into filters so the user can click `Waiting`, `Blocked`, or `Using tools`
@@ -200,7 +196,7 @@ and project coordination over visual customization.
   - promote those sessions into the inbox with a clear reason and duration
   - help users notice agents that silently stopped being productive
 
-### Project coordination
+### Next phase: project coordination
 
 - **Desks as projects or directories**
   - let desks represent a repo, directory, or worktree instead of being only visual slots

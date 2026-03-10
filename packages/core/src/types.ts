@@ -68,6 +68,8 @@ export interface AgentSession {
   lastTurnOutcome: AgentTurnOutcome | null;
   lastTurnOutcomeAt: string | null;
   pendingApprovalJustification: string | null;
+  lastUserQuestion: string | null;
+  lastUserAnswer: string | null;
   offlineReason: OfflineReason | null;
   lastEventAt: string;
   lastEventType: AgentEventType | null;
@@ -91,6 +93,8 @@ export interface AgentSessionSeed {
   lastTurnOutcome?: AgentTurnOutcome | null;
   lastTurnOutcomeAt?: string | null;
   pendingApprovalJustification?: string | null;
+  lastUserQuestion?: string | null;
+  lastUserAnswer?: string | null;
   offlineReason?: OfflineReason | null;
 }
 

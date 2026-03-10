@@ -185,4 +185,31 @@ describe("office-ui", () => {
       }),
     ]);
   });
+
+  it("uses the captured question and response in attention items", () => {
+    const now = Date.parse("2026-03-09T09:10:00.000Z");
+    const waiting = createSession("waiting", {
+      lastUserAnswer: "Minimal change",
+      lastUserQuestion: "Approach: Which implementation path should I use?",
+      state: "waiting_user",
+      updatedAt: new Date(now - 30_000).toISOString(),
+    });
+    const renderSessions = buildLiveOfficeSessions(
+      [waiting],
+      defaultOfficeLayout,
+      {
+        waiting: "desk-01",
+      },
+      now,
+    );
+
+    expect(getAttentionItems(renderSessions, now)).toEqual([
+      expect.objectContaining({
+        detail: "Response recorded",
+        reason: "Approach: Which implementation path should I use?",
+        response: "Minimal change",
+        severity: "warning",
+      }),
+    ]);
+  });
 });

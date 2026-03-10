@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { defaultOfficeLayout, officePalette } from "@office-codex/assets";
@@ -8,7 +8,6 @@ import { OfficeSettingsSheet } from "./components/office-settings-sheet";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card } from "./components/ui/card";
-import { Separator } from "./components/ui/separator";
 import { formatAccountUsageSummary, shouldShowUnavailableUsage } from "./lib/account-usage";
 import {
   basename,
@@ -17,7 +16,7 @@ import {
   formatRelative,
   shortenIdentifier,
 } from "./lib/format";
-import { useOfficeStore } from "./lib/office-store";
+import { type SessionActivityItem, useOfficeStore } from "./lib/office-store";
 import {
   type SessionGeometry,
   buildLiveOfficeSessions,
@@ -29,7 +28,6 @@ import {
 } from "./lib/office-ui";
 import { useOfficeData } from "./lib/use-office-data";
 
-const CONNECTOR_MIN_WIDTH = 1080;
 const TOOLTIP_WIDTH = 276;
 const RECENT_OUTCOME_MS = 300_000;
 
@@ -44,21 +42,16 @@ const stateLabels: Record<string, string> = {
   error: "Error",
 };
 
+const connectionLabels: Record<"connecting" | "ready" | "error", string> = {
+  connecting: "Connecting",
+  error: "Error",
+  ready: "Ready",
+};
+
 const recentOutcomeEventTypes = new Set(["turn_completed", "turn_cancelled", "turn_rolled_back"]);
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
-}
-
-function buildConnectorPath(
-  start: { x: number; y: number },
-  end: { x: number; y: number },
-): string {
-  const controlOffset = Math.max(72, Math.abs(start.x - end.x) * 0.35);
-
-  return `M ${start.x} ${start.y} C ${start.x - controlOffset} ${start.y}, ${
-    end.x + controlOffset
-  } ${end.y}, ${end.x} ${end.y}`;
 }
 
 function getTooltipStyle(
@@ -153,6 +146,17 @@ function getRosterIdentity(
   };
 }
 
+function getCompactSessionMeta(session: {
+  cwd: string;
+  gitBranch: string | null;
+  updatedAt: string;
+}) {
+  const repoName = basename(session.cwd);
+  const branch = session.gitBranch?.trim() || null;
+
+  return branch ? `${repoName} · ${branch}` : `${repoName} · ${formatRelative(session.updatedAt)}`;
+}
+
 function getReliabilityIndicator(session: {
   identityConfidence: "high" | "medium" | "low";
   stateConfidence: "high" | "medium" | "low";
@@ -182,6 +186,59 @@ function getReliabilityIndicator(session: {
   }
 
   return null;
+}
+
+interface DrawerField {
+  label: string;
+  value: string;
+}
+
+function isGenericStateActivityLabel(label: string): boolean {
+  return label.startsWith("Current state:") || label.startsWith("State ->");
+}
+
+function getLatestErrorNarrative(activity: SessionActivityItem[]): string | null {
+  const directError = activity.find(
+    (item) => item.state === "error" && !isGenericStateActivityLabel(item.label),
+  );
+
+  if (directError) {
+    return directError.label;
+  }
+
+  const fallbackError = activity.find((item) => item.state === "error");
+  return fallbackError && !isGenericStateActivityLabel(fallbackError.label)
+    ? fallbackError.label
+    : null;
+}
+
+function getDrawerNarrative(
+  session: {
+    currentTool: string | null;
+    lastUserQuestion: string | null;
+    pendingApprovalJustification: string | null;
+    state: keyof typeof stateLabels;
+  },
+  activity: SessionActivityItem[],
+): string {
+  switch (session.state) {
+    case "waiting_user":
+      return session.lastUserQuestion ?? "Waiting for your response";
+    case "permission_needed":
+      return session.pendingApprovalJustification ?? "Needs your approval";
+    case "error":
+      return getLatestErrorNarrative(activity) ?? "Agent error";
+    case "using_tool":
+      return session.currentTool ? `Using ${session.currentTool}` : "Working now";
+    case "responding":
+      return "Preparing a response";
+    case "thinking":
+      return "Working now";
+    case "inactive":
+      return "Ready";
+    default:
+      return stateLabels[session.state] ?? "Working now";
+  }
 }
 
 function filterRecentOutcomeActivity<
@@ -221,15 +278,12 @@ export function App() {
   );
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [drawerDiagnosticsOpen, setDrawerDiagnosticsOpen] = useState(false);
   const [deskAssignments, setDeskAssignments] = useState<Record<string, string>>({});
   const [now, setNow] = useState(() => Date.now());
   const [sessionGeometries, setSessionGeometries] = useState<Record<string, SessionGeometry>>({});
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
-  const [workspaceSize, setWorkspaceSize] = useState({ width: 0, height: 0 });
-  const [connectorPath, setConnectorPath] = useState<string | null>(null);
-  const workspaceRef = useRef<HTMLElement | null>(null);
   const stageFrameRef = useRef<HTMLDivElement | null>(null);
-  const cardRefs = useRef(new Map<string, HTMLElement>());
   const previousHistoryPageSizeRef = useRef(settings.historyPageSize);
 
   const effectiveLayout = layout ?? defaultOfficeLayout;
@@ -278,6 +332,10 @@ export function App() {
   }, [liveSessions, selectedSessionId]);
 
   useEffect(() => {
+    setDrawerDiagnosticsOpen(false);
+  }, [selectedSessionId]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setSelectedSessionId(null);
@@ -292,9 +350,8 @@ export function App() {
 
   useEffect(() => {
     const stageFrame = stageFrameRef.current;
-    const workspace = workspaceRef.current;
 
-    if (!stageFrame || !workspace) {
+    if (!stageFrame) {
       return;
     }
 
@@ -303,17 +360,12 @@ export function App() {
         height: stageFrame.clientHeight,
         width: stageFrame.clientWidth,
       });
-      setWorkspaceSize({
-        height: workspace.clientHeight,
-        width: workspace.clientWidth,
-      });
     };
 
     syncSizes();
 
     const observer = new ResizeObserver(syncSizes);
     observer.observe(stageFrame);
-    observer.observe(workspace);
 
     return () => {
       observer.disconnect();
@@ -382,7 +434,9 @@ export function App() {
   );
   const tooltipGeometry = hoveredSessionId ? sessionGeometries[hoveredSessionId] : null;
   const tooltipTarget =
-    !settings.showOfficeTooltips || hoveredOfficeSession?.session.state === "offline"
+    selectedSessionId ||
+    !settings.showOfficeTooltips ||
+    hoveredOfficeSession?.session.state === "offline"
       ? null
       : hoveredOfficeSession;
   const tooltipIdentity = tooltipTarget ? getTooltipIdentity(tooltipTarget.session) : null;
@@ -403,58 +457,46 @@ export function App() {
   const selectedReliabilityIndicator = selectedOfficeSession
     ? getReliabilityIndicator(selectedOfficeSession.session)
     : null;
-
-  useLayoutEffect(() => {
-    const workspace = workspaceRef.current;
-    const stageFrame = stageFrameRef.current;
-    const selectedGeometry = selectedSessionId ? sessionGeometries[selectedSessionId] : null;
-    const selectedCard = selectedSessionId ? cardRefs.current.get(selectedSessionId) : null;
-    const selectedCardVisible = selectedSessionId
-      ? visibleLiveSessions.some((session) => session.session.sessionId === selectedSessionId)
-      : false;
-
-    if (!workspace || !stageFrame || !selectedGeometry || !selectedCard || !selectedCardVisible) {
-      setConnectorPath(null);
-      return;
+  const selectedDrawerSummary = useMemo(() => {
+    if (!selectedOfficeSession) {
+      return null;
     }
 
-    if (workspaceSize.width < CONNECTOR_MIN_WIDTH) {
-      setConnectorPath(null);
-      return;
-    }
+    const { session } = selectedOfficeSession;
 
-    const workspaceRect = workspace.getBoundingClientRect();
-    const stageRect = stageFrame.getBoundingClientRect();
-    const cardRect = selectedCard.getBoundingClientRect();
-    const start = {
-      x: cardRect.left - workspaceRect.left,
-      y: cardRect.top - workspaceRect.top + cardRect.height / 2,
+    return {
+      diagnosticsFields: [
+        { label: "Started", value: formatDateTime(session.startedAt) },
+        { label: "Tokens used", value: formatCompactNumber(session.tokensUsed) },
+        { label: "Subtasks", value: String(session.activeSubtasks) },
+        {
+          label: "Reliability",
+          value: selectedReliabilityIndicator?.label ?? "High confidence",
+        },
+        { label: "Signal source", value: session.stateSource },
+      ] satisfies DrawerField[],
+      narrative: getDrawerNarrative(session, selectedActivity),
+      summaryFields: [
+        { label: "Repo", value: basename(session.cwd) },
+        { label: "Branch", value: session.gitBranch ?? "unknown" },
+        { label: "Updated", value: formatRelative(session.updatedAt) },
+      ] satisfies DrawerField[],
     };
-    const end = {
-      x: stageRect.left - workspaceRect.left + selectedGeometry.deskCenter.x,
-      y: stageRect.top - workspaceRect.top + selectedGeometry.deskCenter.y,
-    };
-
-    setConnectorPath(buildConnectorPath(start, end));
-  }, [selectedSessionId, sessionGeometries, visibleLiveSessions, workspaceSize]);
-
+  }, [selectedActivity, selectedOfficeSession, selectedReliabilityIndicator]);
   const tooltipPlacement =
     tooltipTarget && tooltipGeometry
       ? getTooltipStyle(tooltipGeometry, stageSize.width, stageSize.height)
       : null;
   const accountUsageSummary = formatAccountUsageSummary(account);
-
-  const totalVisibleSessions =
-    visibleLiveSessions.length + (showOfflineHistory ? visibleOfflineSessions.length : 0);
-
-  const setCardRef = (sessionId: string) => (node: HTMLElement | null) => {
-    if (node) {
-      cardRefs.current.set(sessionId, node);
-      return;
-    }
-
-    cardRefs.current.delete(sessionId);
-  };
+  const usageUnavailable = shouldShowUnavailableUsage(account);
+  const usageLabel = accountUsageSummary ?? (usageUnavailable ? "Usage unavailable" : "Usage pending");
+  const headerMetrics = [
+    { label: "Active", tone: "default", value: metrics.active },
+    { label: "Thinking", tone: "default", value: metrics.thinking },
+    { label: "Using tools", tone: "default", value: metrics.tooling },
+    { label: "Waiting", tone: "default", value: metrics.waiting },
+    { label: "Blocked", tone: metrics.blocked > 0 ? "alert" : "default", value: metrics.blocked },
+  ] as const;
 
   const toggleSelection = (sessionId: string | null) => {
     setSelectedSessionId((current) => (current === sessionId ? null : sessionId));
@@ -480,101 +522,58 @@ export function App() {
       data-reduced-motion={settings.reducedMotion ? "true" : "false"}
     >
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Office Codex</p>
-          <h1>Pixel dashboard for your local Codex sessions</h1>
+        <div className="topbar-copy">
+          <p className="eyebrow">
+            <span>OFFICE CODEX:</span>{" "}
+            <span className="eyebrow-detail">
+              Pixel office supervision for live desks, attention queues, and focused session
+              drill-down.
+            </span>
+          </p>
+          <h1>Codex Local</h1>
         </div>
-        <div className="topbar-status">
+
+        <div className="topbar-rail">
+          <div className="topbar-metrics" aria-label="Office metrics">
+            {headerMetrics.map((metric) => (
+              <div
+                className={`metric-chip ${metric.tone === "alert" ? "metric-chip-alert" : ""}`}
+                key={metric.label}
+              >
+                <span>{metric.label}</span>
+                <strong>{metric.value}</strong>
+              </div>
+            ))}
+          </div>
+
           <OfficeSettingsSheet
+            connectionLabel={connectionLabels[connection]}
+            connectionState={connection}
             onOpenChange={setSettingsOpen}
             onReset={handleResetSettings}
             onSettingsChange={handleSettingsChange}
             open={settingsOpen}
             settings={settings}
+            usageLabel={usageLabel}
+            usageTone={accountUsageSummary ? "available" : usageUnavailable ? "unavailable" : "pending"}
           />
-          <div className={`connection connection-${connection}`}>
-            <span className="connection-dot" />
-            {connection}
-          </div>
-          {accountUsageSummary ? (
-            <div className="connection connection-usage">
-              <span className="connection-dot connection-dot-usage" />
-              <span>{accountUsageSummary}</span>
-            </div>
-          ) : shouldShowUnavailableUsage(account) ? (
-            <div className="connection connection-usage connection-usage-unavailable">
-              <span className="connection-dot connection-dot-usage" />
-              <span>usage unavailable</span>
-            </div>
-          ) : null}
         </div>
       </header>
 
-      <section className="health-strip">
-        <Card className="health-card">
-          <span>Active</span>
-          <strong>{metrics.active}</strong>
-        </Card>
-        <Card className="health-card">
-          <span>Thinking</span>
-          <strong>{metrics.thinking}</strong>
-        </Card>
-        <Card className="health-card">
-          <span>Using tools</span>
-          <strong>{metrics.tooling}</strong>
-        </Card>
-        <Card className="health-card">
-          <span>Waiting</span>
-          <strong>{metrics.waiting}</strong>
-        </Card>
-        <Card className={`health-card ${metrics.blocked > 0 ? "health-card-alert" : ""}`}>
-          <span>Blocked</span>
-          <strong>{metrics.blocked}</strong>
-        </Card>
-      </section>
-
-      <main className="workspace" ref={workspaceRef}>
-        {connectorPath && selectedOfficeSession ? (
-          <svg
-            className="workspace-overlay"
-            preserveAspectRatio="none"
-            viewBox={`0 0 ${Math.max(workspaceSize.width, 1)} ${Math.max(workspaceSize.height, 1)}`}
-          >
-            <title>Selected session connector</title>
-            <path
-              d={connectorPath}
-              fill="none"
-              opacity="0.25"
-              stroke={selectedOfficeSession.accentSoft}
-              strokeLinecap="round"
-              strokeWidth="12"
-              vectorEffect="non-scaling-stroke"
-            />
-            <path
-              d={connectorPath}
-              fill="none"
-              opacity="0.72"
-              stroke={selectedOfficeSession.accentColor}
-              strokeDasharray="10 12"
-              strokeLinecap="round"
-              strokeWidth="3"
-              vectorEffect="non-scaling-stroke"
-            />
-          </svg>
-        ) : null}
-
+      <main className="workspace">
         <Card className="stage-card">
           <div className="stage-header">
             <div>
               <h2>Live office</h2>
-              <p>Identity, selection and activity cues without reading the roster.</p>
+              <p>Identity, selection and activity cues without reading the full roster.</p>
             </div>
             <div className="stage-meta">
               <span>{effectiveLayout.desks.length} desks</span>
-              <span>{liveOfficeSessions.length} live now</span>
-              <span>{metrics.blocked} blocked</span>
+              <span>{liveCount} live now</span>
+              <span>{offlineCount} offline tracked</span>
             </div>
           </div>
+
           <div className="stage-scene">
             <div
               className="stage-frame"
@@ -632,56 +631,13 @@ export function App() {
           </div>
         </Card>
 
-        <aside className="session-panel">
-          {settings.showAttentionInbox ? (
-            <Card className="insight-card">
-              <div className="panel-subheader">
-                <h3>Attention inbox</h3>
-                <p>Sessions that need action or are waiting on you.</p>
-              </div>
-
-              {attentionItems.length === 0 ? (
-                <p className="insight-empty">No sessions need attention right now.</p>
-              ) : (
-                <div className="attention-list">
-                  {attentionItems.map((item) => {
-                    const sessionIdentity = getRosterIdentity(item.session.session, {
-                      deskBadge: item.session.deskBadge,
-                    });
-
-                    return (
-                      <button
-                        className={`attention-item attention-item-${item.severity}`}
-                        key={`${item.session.session.sessionId}:${item.reason}`}
-                        onClick={() => toggleSelection(item.session.session.sessionId)}
-                        type="button"
-                      >
-                        <span className="attention-badge">{item.session.deskBadge}</span>
-                        <span className="attention-copy">
-                          <strong>{sessionIdentity.primary}</strong>
-                          <span>{item.reason}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </Card>
-          ) : null}
-
+        <aside
+          className={`session-panel ${
+            selectedOfficeSession ? "session-panel-detail" : "session-panel-overview"
+          }`}
+        >
           {selectedOfficeSession ? (
             <Card className="insight-card drawer-card">
-              <div className="panel-subheader">
-                <h3>Session drawer</h3>
-                <p>
-                  {
-                    getRosterIdentity(selectedOfficeSession.session, {
-                      deskBadge: selectedOfficeSession.deskBadge,
-                    }).secondary
-                  }
-                </p>
-              </div>
-
               <div className="drawer-header">
                 <div className="session-card-identity">
                   <div className="session-card-badge-stack">
@@ -700,102 +656,57 @@ export function App() {
                         }).primary
                       }
                     </h3>
-                    <p>{stateLabels[selectedOfficeSession.session.state]}</p>
+                    <div className="drawer-status-line">
+                      <Badge
+                        className={`badge badge-${selectedOfficeSession.session.state}`}
+                        variant="outline"
+                      >
+                        {stateLabels[selectedOfficeSession.session.state]}
+                      </Badge>
+                    </div>
                   </div>
                 </div>
-                <Button
-                  className="panel-button panel-button-ghost"
+                <button
+                  aria-label="Close selected session"
+                  className="drawer-close-button"
                   onClick={() => setSelectedSessionId(null)}
-                  variant="ghost"
                   type="button"
                 >
-                  Clear
-                </Button>
+                  <svg aria-hidden="true" height="16" viewBox="0 0 20 20" width="16">
+                    <path
+                      d="M5 5l10 10M15 5 5 15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.6"
+                    />
+                  </svg>
+                  <span className="sr-only">Close selected session</span>
+                </button>
               </div>
 
-              <dl className="drawer-grid">
-                <div>
-                  <dt>Repo</dt>
-                  <dd>{basename(selectedOfficeSession.session.cwd)}</dd>
-                </div>
-                <div>
-                  <dt>Branch</dt>
-                  <dd>{selectedOfficeSession.session.gitBranch ?? "unknown"}</dd>
-                </div>
-                <div>
-                  <dt>Started</dt>
-                  <dd>{formatDateTime(selectedOfficeSession.session.startedAt)}</dd>
-                </div>
-                <div>
-                  <dt>Updated</dt>
-                  <dd>{formatRelative(selectedOfficeSession.session.updatedAt)}</dd>
-                </div>
-                <div>
-                  <dt>Tokens used</dt>
-                  <dd>{formatCompactNumber(selectedOfficeSession.session.tokensUsed)}</dd>
-                </div>
-                <div>
-                  <dt>Subtasks</dt>
-                  <dd>{selectedOfficeSession.session.activeSubtasks}</dd>
-                </div>
-                <div>
-                  <dt>Reliability</dt>
-                  <dd>{selectedReliabilityIndicator?.label ?? "High confidence"}</dd>
-                </div>
-                <div>
-                  <dt>Signal source</dt>
-                  <dd>{selectedOfficeSession.session.stateSource}</dd>
-                </div>
-                {selectedOfficeSession.session.state === "permission_needed" ? (
-                  <div>
-                    <dt>Approval</dt>
-                    <dd>
-                      {selectedOfficeSession.session.pendingApprovalJustification ??
-                        "Needs your approval"}
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
-
-              {selectedOfficeSession.session.reliabilityHints.length > 0 ? (
-                <div className="drawer-section">
-                  <div className="drawer-section-head">
-                    <h4>Reliability</h4>
-                  </div>
-                  <ul className="hint-list">
-                    {selectedOfficeSession.session.reliabilityHints.map((hint) => (
-                      <li key={hint}>{hint}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
               <div className="drawer-section">
-                <div className="drawer-section-head">
-                  <h4>Recent tools</h4>
-                </div>
-                {selectedRecentTools.length === 0 ? (
-                  <p className="insight-empty">No tool activity recorded yet.</p>
-                ) : (
-                  <div className="tool-chip-list">
-                    {selectedRecentTools.map((tool) => (
-                      <span className="tool-chip" key={tool}>
-                        {tool}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <p className="drawer-narrative">{selectedDrawerSummary?.narrative}</p>
+                <dl className="drawer-grid drawer-grid-summary">
+                  {selectedDrawerSummary?.summaryFields.map((field) => (
+                    <div key={field.label}>
+                      <dt>{field.label}</dt>
+                      <dd>{field.value}</dd>
+                    </div>
+                  ))}
+                </dl>
               </div>
 
               <div className="drawer-section">
                 <div className="drawer-section-head">
-                  <h4>Activity timeline</h4>
+                  <h4>Recent activity</h4>
                 </div>
                 {visibleSelectedActivity.length === 0 ? (
                   <p className="insight-empty">No activity recorded yet.</p>
                 ) : (
                   <ol className="timeline-list">
-                    {visibleSelectedActivity.slice(0, 6).map((item) => (
+                    {visibleSelectedActivity.slice(0, 4).map((item) => (
                       <li key={item.id}>
                         <span className={`timeline-dot timeline-dot-${item.state}`} />
                         <div>
@@ -807,233 +718,268 @@ export function App() {
                   </ol>
                 )}
               </div>
-            </Card>
-          ) : null}
 
-          {selectedOfficeSession ? <Separator className="my-1" /> : null}
+              <div className="drawer-section drawer-diagnostics">
+                <div className="drawer-section-head">
+                  <h4>Diagnostics</h4>
+                  <button
+                    aria-controls="drawer-diagnostics-panel"
+                    aria-expanded={drawerDiagnosticsOpen}
+                    className="drawer-section-toggle"
+                    onClick={() => setDrawerDiagnosticsOpen((current) => !current)}
+                    type="button"
+                  >
+                    {drawerDiagnosticsOpen ? "Hide diagnostics" : "Show diagnostics"}
+                  </button>
+                </div>
 
-          <div className="panel-header">
-            <div>
-              <h2>Session roster</h2>
-              <p>Live sessions follow desk order. Offline history stays separate.</p>
-            </div>
-            <div className="panel-actions">
-              {offlineCount > 0 ? (
-                <Button
-                  className="panel-button"
-                  onClick={() => setShowOfflineHistory((current) => !current)}
-                  type="button"
-                  variant="default"
-                >
-                  {showOfflineHistory
-                    ? `Hide offline history (${offlineCount})`
-                    : `Show offline history (${offlineCount})`}
-                </Button>
-              ) : null}
-            </div>
-          </div>
+                {drawerDiagnosticsOpen ? (
+                  <div className="drawer-diagnostics-body" id="drawer-diagnostics-panel">
+                    <dl className="drawer-grid drawer-grid-diagnostics">
+                      {selectedDrawerSummary?.diagnosticsFields.map((field) => (
+                        <div key={field.label}>
+                          <dt>{field.label}</dt>
+                          <dd>{field.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
 
-          <div className="panel-summary">
-            <span>{liveCount} live</span>
-            <span>{offlineCount} offline</span>
-            <span>showing {totalVisibleSessions}</span>
-          </div>
+                    {selectedOfficeSession.session.reliabilityHints.length > 0 ? (
+                      <div className="drawer-diagnostics-section">
+                        <h5>Reliability notes</h5>
+                        <ul className="hint-list">
+                          {selectedOfficeSession.session.reliabilityHints.map((hint) => (
+                            <li key={hint}>{hint}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
 
-          {hiddenLiveCount > 0 ? (
-            <p className="panel-summary-note">
-              Showing the first {settings.liveRosterLimit} live desks in spatial order.
-            </p>
-          ) : null}
-
-          {visibleLiveSessions.length === 0 ? (
-            <Card className="empty-card">
-              <strong>No live sessions right now.</strong>
-              <p>
-                Start one with `office-codex run -- ...`. You can still inspect the offline history
-                whenever you need it.
-              </p>
+                    {selectedRecentTools.length > 0 ? (
+                      <div className="drawer-diagnostics-section">
+                        <h5>Recent tools</h5>
+                        <div className="tool-chip-list">
+                          {selectedRecentTools.map((tool) => (
+                            <span className="tool-chip" key={tool}>
+                              {tool}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </Card>
           ) : (
-            <div className="session-list">
-              {visibleLiveSessions.map((renderSession) => {
-                const { accentColor, deskBadge, isBlocked, session, variant } = renderSession;
-                const isSelected = selectedSessionId === session.sessionId;
-                const isLinked = !selectedSessionId && linkedSessionId === session.sessionId;
-                const sessionIdentity = getRosterIdentity(session, { deskBadge });
-                const reliabilityIndicator = getReliabilityIndicator(session);
-
-                return (
-                  <div
-                    className={`session-card session-card-live ${
-                      isBlocked ? "session-card-blocked" : ""
-                    } ${isSelected ? "session-card-selected" : ""} ${
-                      isLinked ? "session-card-active" : ""
-                    }`}
-                    key={session.sessionId}
-                    onMouseEnter={() => setHoveredSessionId(session.sessionId)}
-                    onMouseLeave={() =>
-                      setHoveredSessionId((current) =>
-                        current === session.sessionId ? null : current,
-                      )
-                    }
-                    onMouseUp={() => toggleSelection(session.sessionId)}
-                    ref={setCardRef(session.sessionId)}
-                    style={
-                      {
-                        "--session-accent": accentColor,
-                        "--session-accent-soft": renderSession.accentSoft,
-                      } as CSSProperties
-                    }
-                  >
-                    <div className="session-card-head">
-                      <div className="session-card-identity">
-                        <div className="session-card-badge-stack">
-                          <span className="desk-badge">{deskBadge}</span>
-                          <MiniAgentAvatar
-                            color={accentColor}
-                            label={`Agent ${deskBadge}`}
-                            variant={variant}
-                          />
-                        </div>
-                        <div>
-                          <h3>{sessionIdentity.primary}</h3>
-                          <p>{sessionIdentity.secondary}</p>
-                          {reliabilityIndicator ? (
-                            <span
-                              className={`session-reliability session-reliability-${reliabilityIndicator.tone}`}
-                              title={reliabilityIndicator.description}
-                            >
-                              {reliabilityIndicator.label}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                      <div className="session-card-status">
-                        <Badge className={`badge badge-${session.state}`} variant="outline">
-                          {stateLabels[session.state]}
-                        </Badge>
-                      </div>
-                    </div>
-                    <dl>
-                      <div>
-                        <dt>Branch</dt>
-                        <dd>{session.gitBranch ?? "unknown"}</dd>
-                      </div>
-                      <div>
-                        <dt>Tool</dt>
-                        <dd>{session.currentTool ?? "none"}</dd>
-                      </div>
-                      <div>
-                        <dt>Updated</dt>
-                        <dd>{formatRelative(session.updatedAt)}</dd>
-                      </div>
-                      <div>
-                        <dt>Subtasks</dt>
-                        <dd>{session.activeSubtasks}</dd>
-                      </div>
-                    </dl>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {showOfflineHistory ? (
             <>
-              <div className="panel-subheader">
-                <h3>Offline history</h3>
-                <p>
-                  Chronological only. Cards keep avatar color, but they no longer map to a live
-                  desk.
-                </p>
+              <div className="panel-header">
+                <div>
+                  <h2>Session overview</h2>
+                  <p>Attention first, then live desks, with offline history tucked below.</p>
+                </div>
               </div>
 
-              {historyLoading && visibleOfflineSessions.length === 0 ? (
-                <Card className="empty-card">
-                  <strong>Loading offline history.</strong>
-                  <p>Fetching the most recent offline sessions from the daemon.</p>
-                </Card>
-              ) : (
-                <div className="session-list">
-                  {visibleOfflineSessions.map((session) => {
-                    const accentColor = getSessionAccent(session.sessionId);
-                    const sessionIdentity = getRosterIdentity(session, { offline: true });
+              {settings.showAttentionInbox && attentionItems.length > 0 ? (
+                <section className="panel-section">
+                  <div className="panel-subheader">
+                    <h3>Attention</h3>
+                    <p>Sessions that need action or are waiting on you.</p>
+                  </div>
 
-                    return (
-                      <article
-                        className="session-card session-card-offline"
-                        key={session.sessionId}
-                        onMouseEnter={() => setHoveredSessionId(session.sessionId)}
-                        onMouseLeave={() =>
-                          setHoveredSessionId((current) =>
-                            current === session.sessionId ? null : current,
-                          )
-                        }
-                        style={
-                          {
-                            "--session-accent": accentColor,
-                            "--session-accent-soft": getSessionAccentSoft(session.sessionId),
-                          } as CSSProperties
-                        }
-                      >
-                        <div className="session-card-head">
-                          <div className="session-card-identity">
-                            <div className="session-card-badge-stack">
-                              <span className="desk-badge desk-badge-offline">OFF</span>
-                              <MiniAgentAvatar
-                                color={accentColor}
-                                label="Offline agent"
-                                variant={0}
-                              />
-                            </div>
-                            <div>
-                              <h3>{sessionIdentity.primary}</h3>
-                              <p>{sessionIdentity.secondary}</p>
-                            </div>
-                          </div>
-                          <Badge className={`badge badge-${session.state}`} variant="outline">
-                            {stateLabels[session.state]}
-                          </Badge>
-                        </div>
-                        <dl>
-                          <div>
-                            <dt>Branch</dt>
-                            <dd>{session.gitBranch ?? "unknown"}</dd>
-                          </div>
-                          <div>
-                            <dt>Tool</dt>
-                            <dd>{session.currentTool ?? "none"}</dd>
-                          </div>
-                          <div>
-                            <dt>Updated</dt>
-                            <dd>{formatRelative(session.updatedAt)}</dd>
-                          </div>
-                          <div>
-                            <dt>Subtasks</dt>
-                            <dd>{session.activeSubtasks}</dd>
-                          </div>
-                        </dl>
-                      </article>
-                    );
-                  })}
+                  <div className="attention-list">
+                    {attentionItems.map((item) => {
+                      const sessionIdentity = getRosterIdentity(item.session.session, {
+                        deskBadge: item.session.deskBadge,
+                      });
+
+                      return (
+                        <button
+                          className={`attention-item attention-item-${item.severity}`}
+                          key={`${item.session.session.sessionId}:${item.reason}`}
+                          onClick={() => toggleSelection(item.session.session.sessionId)}
+                          type="button"
+                        >
+                          <span className="attention-badge">{item.session.deskBadge}</span>
+                          <span className="attention-copy">
+                            <strong>{sessionIdentity.primary}</strong>
+                            <span>{item.reason}</span>
+                            {item.response ? (
+                              <span className="attention-response">Response: {item.response}</span>
+                            ) : null}
+                            {item.detail ? (
+                              <span className="attention-detail">{item.detail}</span>
+                            ) : null}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+
+              <section className="panel-section">
+                <div className="panel-subheader">
+                  <h3>Live sessions</h3>
+                  <p>
+                    {liveCount} live across {effectiveLayout.desks.length} desks.
+                  </p>
                 </div>
-              )}
-            </>
-          ) : null}
 
-          {showOfflineHistory && hiddenOfflineCount > 0 ? (
-            <Button
-              className="panel-button panel-button-secondary"
-              disabled={historyLoading}
-              onClick={() => void loadMoreHistory()}
-              type="button"
-              variant="secondary"
-            >
-              {historyLoading
-                ? "Loading offline history..."
-                : `Show ${settings.historyPageSize} more offline sessions (${hiddenOfflineCount} remaining)`}
-            </Button>
-          ) : null}
+                {hiddenLiveCount > 0 ? (
+                  <p className="panel-summary-note">
+                    Showing the first {settings.liveRosterLimit} live desks in spatial order.
+                  </p>
+                ) : null}
+
+                {visibleLiveSessions.length === 0 ? (
+                  <Card className="empty-card">
+                    <strong>No live sessions right now.</strong>
+                    <p>
+                      Start one with `office-codex run -- ...`. You can still inspect the offline
+                      history whenever you need it.
+                    </p>
+                  </Card>
+                ) : (
+                  <div className="session-list session-list-compact">
+                    {visibleLiveSessions.map((renderSession) => {
+                      const { accentColor, deskBadge, isBlocked, session } = renderSession;
+                      const isLinked = linkedSessionId === session.sessionId;
+                      const sessionIdentity = getRosterIdentity(session, { deskBadge });
+
+                      return (
+                        <button
+                          className={`session-card session-card-live session-card-compact ${
+                            isBlocked ? "session-card-blocked" : ""
+                          } ${isLinked ? "session-card-active" : ""}`}
+                          key={session.sessionId}
+                          onClick={() => toggleSelection(session.sessionId)}
+                          onFocus={() => setHoveredSessionId(session.sessionId)}
+                          onBlur={() =>
+                            setHoveredSessionId((current) =>
+                              current === session.sessionId ? null : current,
+                            )
+                          }
+                          onMouseEnter={() => setHoveredSessionId(session.sessionId)}
+                          onMouseLeave={() =>
+                            setHoveredSessionId((current) =>
+                              current === session.sessionId ? null : current,
+                            )
+                          }
+                          type="button"
+                          style={
+                            {
+                              "--session-accent": accentColor,
+                              "--session-accent-soft": renderSession.accentSoft,
+                            } as CSSProperties
+                          }
+                        >
+                          <div className="session-card-head">
+                            <div className="session-card-identity">
+                              <span className="desk-badge">{deskBadge}</span>
+                              <div>
+                                <h3>{sessionIdentity.primary}</h3>
+                                <p>{getCompactSessionMeta(session)}</p>
+                              </div>
+                            </div>
+                            <div className="session-card-status">
+                              <Badge className={`badge badge-${session.state}`} variant="outline">
+                                {stateLabels[session.state]}
+                              </Badge>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {offlineCount > 0 ? (
+                <section className="panel-section panel-section-history">
+                  <div className="panel-header panel-header-inline">
+                    <div>
+                      <h2>Offline history</h2>
+                      <p>Chronological only and collapsed by default.</p>
+                    </div>
+                    <div className="panel-actions">
+                      <Button
+                        className="panel-button"
+                        onClick={() => setShowOfflineHistory((current) => !current)}
+                        type="button"
+                        variant="default"
+                      >
+                        {showOfflineHistory
+                          ? "Hide history"
+                          : `Show history (${offlineCount})`}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {showOfflineHistory ? (
+                    historyLoading && visibleOfflineSessions.length === 0 ? (
+                      <Card className="empty-card">
+                        <strong>Loading offline history.</strong>
+                        <p>Fetching the most recent offline sessions from the daemon.</p>
+                      </Card>
+                    ) : (
+                      <div className="session-list session-list-compact">
+                        {visibleOfflineSessions.map((session) => {
+                          const accentColor = getSessionAccent(session.sessionId);
+                          const sessionIdentity = getRosterIdentity(session, { offline: true });
+
+                          return (
+                            <article
+                              className="session-card session-card-offline session-card-compact"
+                              key={session.sessionId}
+                              style={
+                                {
+                                  "--session-accent": accentColor,
+                                  "--session-accent-soft": getSessionAccentSoft(session.sessionId),
+                                } as CSSProperties
+                              }
+                            >
+                              <div className="session-card-head">
+                                <div className="session-card-identity">
+                                  <span className="desk-badge desk-badge-offline">OFF</span>
+                                  <div>
+                                    <h3>{sessionIdentity.primary}</h3>
+                                    <p>{getCompactSessionMeta(session)}</p>
+                                  </div>
+                                </div>
+                                <div className="session-card-status">
+                                  <Badge
+                                    className={`badge badge-${session.state}`}
+                                    variant="outline"
+                                  >
+                                    {stateLabels[session.state]}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    )
+                  ) : null}
+
+                  {showOfflineHistory && hiddenOfflineCount > 0 ? (
+                    <Button
+                      className="panel-button panel-button-secondary"
+                      disabled={historyLoading}
+                      onClick={() => void loadMoreHistory()}
+                      type="button"
+                      variant="secondary"
+                    >
+                      {historyLoading
+                        ? "Loading offline history..."
+                        : `Show ${settings.historyPageSize} more offline sessions (${hiddenOfflineCount} remaining)`}
+                    </Button>
+                  ) : null}
+                </section>
+              ) : null}
+            </>
+          )}
         </aside>
       </main>
     </div>

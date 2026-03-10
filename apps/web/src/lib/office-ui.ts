@@ -36,6 +36,8 @@ export interface OfficeRenderSession {
 
 export interface AttentionItem {
   reason: string;
+  detail?: string;
+  response?: string;
   session: OfficeRenderSession;
   severity: "critical" | "warning";
 }
@@ -342,10 +344,23 @@ export function getAttentionItems(
     }
 
     if (renderSession.session.state === "waiting_user") {
+      const blockedMinutes = Math.floor(
+        (now - Date.parse(renderSession.session.updatedAt)) / 60000,
+      );
+      const question = renderSession.session.lastUserQuestion;
+      const response = renderSession.session.lastUserAnswer;
+      const detail = renderSession.isBlocked
+        ? response
+          ? `Waiting ${blockedMinutes}m after reply`
+          : `Waiting ${blockedMinutes}m`
+        : response
+          ? "Response recorded"
+          : "Awaiting response";
+
       items.push({
-        reason: renderSession.isBlocked
-          ? `Waiting ${Math.floor((now - Date.parse(renderSession.session.updatedAt)) / 60000)}m`
-          : "Awaiting response",
+        ...(question ? { detail } : {}),
+        ...(response ? { response } : {}),
+        reason: question ?? detail,
         session: renderSession,
         severity: "warning",
       });

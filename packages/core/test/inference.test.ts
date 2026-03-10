@@ -54,6 +54,10 @@ describe("reduceTranscriptEntries", () => {
 
     expect(result.session.state).toBe("waiting_user");
     expect(result.session.currentTool).toBeNull();
+    expect(result.session.lastUserQuestion).toBe(
+      "Approach: Which implementation path should I use?",
+    );
+    expect(result.session.lastUserAnswer).toBe("Minimal change");
 
     const stateChanges = result.emitted.filter((event) => event.type === "state_changed");
     expect(stateChanges.at(-1)?.state).toBe("waiting_user");
@@ -80,6 +84,32 @@ describe("reduceTranscriptEntries", () => {
 
     expect(result.session.state).toBe("waiting_user");
     expect(result.session.activeSubtasks).toBe(0);
+  });
+
+  it("formats multiple captured answers into a readable summary", () => {
+    const result = reduceTranscriptEntries(
+      {
+        sessionId: "session-input-multi",
+        source: "vscode",
+        title: "Office Codex",
+        cwd: "/workspace/demo",
+        rolloutPath: "/tmp/request-user-input-multi.jsonl",
+        startedAt: "2026-03-09T19:23:00.000Z",
+      },
+      parseTranscriptLines(`
+{"timestamp":"2026-03-09T19:23:00.000Z","type":"session_meta","payload":{"id":"session-input-multi","timestamp":"2026-03-09T19:23:00.000Z","cwd":"/workspace/demo","originator":"Codex Desktop","cli_version":"0.108.0-alpha.12","source":"vscode","model_provider":"openai"}}
+{"timestamp":"2026-03-09T19:23:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-4","collaboration_mode_kind":"plan"}}
+{"timestamp":"2026-03-09T19:23:02.000Z","type":"response_item","payload":{"type":"function_call","name":"request_user_input","arguments":"{\\"questions\\":[{\\"id\\":\\"repo_scope\\",\\"question\\":\\"Which repo scope should I use?\\"},{\\"id\\":\\"testing\\",\\"question\\":\\"Should I run tests?\\"}]}","call_id":"call-multi"}}
+{"timestamp":"2026-03-09T19:23:03.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-multi","output":"{\\"answers\\":{\\"repo_scope\\":\\"Web only\\",\\"testing\\":{\\"label\\":\\"Run the focused suite\\"}}}"}}
+      `),
+    );
+
+    expect(result.session.lastUserQuestion).toBe(
+      "Which repo scope should I use? | Should I run tests?",
+    );
+    expect(result.session.lastUserAnswer).toBe(
+      "Repo scope: Web only | Testing: Run the focused suite",
+    );
   });
 
   it("returns the parent session to inactive while keeping parallel subtasks tracked", () => {

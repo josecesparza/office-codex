@@ -31,6 +31,8 @@ export interface SessionSeedPatch {
   lastTurnOutcome?: AgentSession["lastTurnOutcome"];
   lastTurnOutcomeAt?: string | null;
   pendingApprovalJustification?: string | null;
+  lastUserQuestion?: string | null;
+  lastUserAnswer?: string | null;
   offlineReason?: AgentSession["offlineReason"];
 }
 
@@ -117,6 +119,8 @@ function mergeSessionSeed(session: AgentSession, seed: SessionSeedPatch): AgentS
     lastTurnOutcomeAt: seed.lastTurnOutcomeAt ?? session.lastTurnOutcomeAt,
     pendingApprovalJustification:
       seed.pendingApprovalJustification ?? session.pendingApprovalJustification,
+    lastUserQuestion: seed.lastUserQuestion ?? session.lastUserQuestion,
+    lastUserAnswer: seed.lastUserAnswer ?? session.lastUserAnswer,
     offlineReason: seed.offlineReason ?? session.offlineReason,
   };
 }
@@ -216,6 +220,14 @@ export class SessionStore {
 
       if (seed.pendingApprovalJustification !== undefined) {
         createSeed.pendingApprovalJustification = seed.pendingApprovalJustification;
+      }
+
+      if (seed.lastUserQuestion !== undefined) {
+        createSeed.lastUserQuestion = seed.lastUserQuestion;
+      }
+
+      if (seed.lastUserAnswer !== undefined) {
+        createSeed.lastUserAnswer = seed.lastUserAnswer;
       }
 
       if (seed.offlineReason !== undefined) {

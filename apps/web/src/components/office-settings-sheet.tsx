@@ -37,11 +37,15 @@ function SettingsIcon() {
 }
 
 interface OfficeSettingsSheetProps {
+  connectionLabel: string;
+  connectionState: "connecting" | "ready" | "error";
   onReset(): void;
   onSettingsChange(patch: Partial<OfficeUiSettings>): void;
   open: boolean;
   onOpenChange(open: boolean): void;
   settings: OfficeUiSettings;
+  usageLabel: string;
+  usageTone: "available" | "pending" | "unavailable";
 }
 
 export function OfficeSettingsSheet(props: OfficeSettingsSheetProps) {
@@ -51,13 +55,14 @@ export function OfficeSettingsSheet(props: OfficeSettingsSheetProps) {
         aria-expanded={props.open}
         aria-haspopup="dialog"
         aria-label="Open settings"
+        className="settings-trigger"
         onClick={() => props.onOpenChange(true)}
         size="sm"
         type="button"
         variant="ghost"
       >
         <SettingsIcon />
-        <span>Settings</span>
+        <span className="sr-only">Settings</span>
       </Button>
 
       <Sheet onOpenChange={props.onOpenChange} open={props.open}>
@@ -68,6 +73,37 @@ export function OfficeSettingsSheet(props: OfficeSettingsSheetProps) {
               Browser-local preferences for the dashboard chrome and office view.
             </SheetDescription>
           </SheetHeader>
+
+          <Card className="settings-status-summary">
+            <div className="settings-status-copy">
+              <h3>Status</h3>
+              <p>Connection and usage availability for this local dashboard session.</p>
+            </div>
+
+            <div className="settings-status-list">
+              <div className="settings-status-item">
+                <span
+                  aria-hidden="true"
+                  className={`settings-status-dot settings-status-dot-${props.connectionState}`}
+                />
+                <div className="settings-status-meta">
+                  <span className="settings-status-label">Connection</span>
+                  <strong>{props.connectionLabel}</strong>
+                </div>
+              </div>
+
+              <div className="settings-status-item">
+                <span
+                  aria-hidden="true"
+                  className={`settings-status-dot settings-status-dot-${props.usageTone}`}
+                />
+                <div className="settings-status-meta">
+                  <span className="settings-status-label">Usage</span>
+                  <strong>{props.usageLabel}</strong>
+                </div>
+              </div>
+            </div>
+          </Card>
 
           <Card className="grid gap-4 p-4">
             <div className="grid gap-1">

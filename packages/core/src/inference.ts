@@ -66,6 +66,124 @@ function setTurnOutcome(
   session.lastTurnOutcomeAt = timestamp;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function humanizeKey(value: string): string {
+  const normalized = value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return "Answer";
+  }
+
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function joinSummary(values: Array<string | null | undefined>): string | null {
+  const filtered = values.map((value) => value?.trim() ?? "").filter((value) => value.length > 0);
+
+  if (filtered.length === 0) {
+    return null;
+  }
+
+  return filtered.join(" | ");
+}
+
+function summarizeUnknown(value: unknown): string | null {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return joinSummary(value.map((item) => summarizeUnknown(item)));
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  for (const key of ["label", "text", "value", "content", "answer"]) {
+    const preferred = summarizeUnknown(value[key]);
+
+    if (preferred) {
+      return preferred;
+    }
+  }
+
+  return joinSummary(
+    Object.entries(value).map(([key, item]) => {
+      const summary = summarizeUnknown(item);
+      return summary ? `${humanizeKey(key)}: ${summary}` : null;
+    }),
+  );
+}
+
+function extractLastUserQuestion(argumentsJson: Record<string, unknown> | null): string | null {
+  const questions = argumentsJson?.questions;
+
+  if (!Array.isArray(questions)) {
+    return null;
+  }
+
+  return joinSummary(
+    questions.map((question) => {
+      if (!isRecord(question)) {
+        return null;
+      }
+
+      const header =
+        typeof question.header === "string" && question.header.trim().length > 0
+          ? question.header.trim()
+          : null;
+      const prompt =
+        typeof question.question === "string" && question.question.trim().length > 0
+          ? question.question.trim()
+          : null;
+
+      if (header && prompt) {
+        return `${header}: ${prompt}`;
+      }
+
+      return prompt ?? header;
+    }),
+  );
+}
+
+function extractLastUserAnswer(output: string): string | null {
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    const answers = isRecord(parsed) && "answers" in parsed ? parsed.answers : parsed;
+
+    if (isRecord(answers)) {
+      const entries = Object.entries(answers);
+      return joinSummary(
+        entries.map(([key, value]) => {
+          const summary = summarizeUnknown(value);
+
+          if (!summary) {
+            return null;
+          }
+
+          return entries.length === 1 ? summary : `${humanizeKey(key)}: ${summary}`;
+        }),
+      );
+    }
+
+    return summarizeUnknown(answers);
+  } catch {
+    return null;
+  }
+}
+
 function updateSubtasks(
   session: AgentSession,
   nextCount: number,
@@ -120,6 +238,8 @@ export function applyTranscriptEntry(
       resetTurnOutcome(nextSession);
       updateSubtasks(nextSession, nextSession.activeSubtasks + 1, entry.timestamp, emitted);
       nextSession.pendingApprovalJustification = null;
+      nextSession.lastUserQuestion = null;
+      nextSession.lastUserAnswer = null;
       nextSession.stateSource = "transcript";
       transitionState(nextSession, "thinking", entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
@@ -134,6 +254,10 @@ export function applyTranscriptEntry(
       nextSession.stateSource = "transcript";
       nextSession.pendingApprovalJustification =
         entry.sandboxPermissions === "require_escalated" ? entry.justification : null;
+      if (entry.name === "request_user_input") {
+        nextSession.lastUserQuestion = extractLastUserQuestion(entry.argumentsJson);
+        nextSession.lastUserAnswer = null;
+      }
       emitted.push(createEvent(nextSession, "tool_started", entry.timestamp, entry.name));
 
       if (entry.sandboxPermissions === "require_escalated") {
@@ -159,6 +283,9 @@ export function applyTranscriptEntry(
 
     case "function_call_output":
       nextSession.stateSource = "transcript";
+      if (nextSession.currentTool === "request_user_input") {
+        nextSession.lastUserAnswer = extractLastUserAnswer(entry.output);
+      }
       clearCurrentTool(nextSession, entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
 
@@ -177,6 +304,8 @@ export function applyTranscriptEntry(
     case "user_message":
       resetTurnOutcome(nextSession);
       nextSession.pendingApprovalJustification = null;
+      nextSession.lastUserQuestion = null;
+      nextSession.lastUserAnswer = null;
       nextSession.stateSource = "transcript";
       transitionState(nextSession, "thinking", entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);

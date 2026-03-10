@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import type { AgentSession } from "@office-codex/core";
 
 import { App } from "./app";
 import { DEFAULT_OFFICE_UI_SETTINGS } from "./lib/office-settings";
+import type { SessionActivityItem } from "./lib/office-store";
 import { useOfficeStore } from "./lib/office-store";
 
 const loadMoreHistory = vi.fn<() => Promise<void>>(() => Promise.resolve());
@@ -172,7 +173,9 @@ describe("app settings", () => {
     const user = userEvent.setup();
 
     useOfficeStore.setState({
-      account: null,
+      account: {
+        status: "unavailable",
+      },
       activityBySession: {},
       connection: "ready",
       historySessions: [
@@ -199,13 +202,19 @@ describe("app settings", () => {
 
     render(<App />);
 
-    expect(screen.queryByText("Offline history")).toBeNull();
+    expect(screen.queryByText("Offline session")).toBeNull();
+    expect(screen.queryByText("Usage unavailable")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /open settings/i }));
-    expect(screen.getByRole("dialog")).toBeTruthy();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toBeTruthy();
+    expect(within(dialog).getByText("Connection")).toBeTruthy();
+    expect(within(dialog).getByText("Ready")).toBeTruthy();
+    expect(within(dialog).getByText("Usage")).toBeTruthy();
+    expect(within(dialog).getByText("Usage unavailable")).toBeTruthy();
 
     await user.click(screen.getByRole("switch", { name: /show offline history by default/i }));
-    expect(screen.getByText("Offline history")).toBeTruthy();
+    expect(screen.getByText("Offline session")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /close settings/i }));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -214,6 +223,19 @@ describe("app settings", () => {
   it("updates live roster limit, history page size, tooltip visibility and reduced motion", async () => {
     const user = userEvent.setup();
     const liveSessions = buildLiveSessions(15);
+    const attentionSessionIndex = liveSessions.length - 1;
+    const attentionSession = liveSessions[attentionSessionIndex];
+
+    if (!attentionSession) {
+      throw new Error("Expected at least one live session");
+    }
+
+    liveSessions[attentionSessionIndex] = {
+      ...attentionSession,
+      lastUserQuestion: "Need approval for the rollout path",
+      state: "waiting_user",
+      updatedAt: "2026-03-09T09:20:00.000Z",
+    };
 
     useOfficeStore.setState({
       account: null,
@@ -255,9 +277,9 @@ describe("app settings", () => {
     await user.click(screen.getByRole("switch", { name: /compact roster mode/i }));
     expect(container.firstElementChild?.getAttribute("data-compact-mode")).toBe("true");
 
-    expect(screen.getByText("Attention inbox")).toBeTruthy();
+    expect(screen.getByText("Attention")).toBeTruthy();
     await user.click(screen.getByRole("switch", { name: /show attention inbox/i }));
-    expect(screen.queryByText("Attention inbox")).toBeNull();
+    expect(screen.queryByText("Attention")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /close settings/i }));
     await user.hover(screen.getByTestId("office-canvas"));
@@ -284,7 +306,7 @@ describe("app settings", () => {
     expect(screen.getByTestId("office-canvas").getAttribute("data-reduced-motion")).toBe("true");
 
     await user.click(screen.getByRole("button", { name: /close settings/i }));
-    await user.click(screen.getByRole("button", { name: /show offline history/i }));
+    await user.click(screen.getByRole("button", { name: /show history/i }));
     await user.click(screen.getByRole("button", { name: /open settings/i }));
     loadMoreHistory.mockClear();
 
@@ -295,5 +317,204 @@ describe("app settings", () => {
       limit: 50,
       reset: true,
     });
+  });
+
+  it("shows captured waiting questions and responses in the attention inbox", () => {
+    const updatedAt = new Date(Date.now() - 30_000).toISOString();
+
+    useOfficeStore.setState({
+      account: null,
+      activityBySession: {},
+      connection: "ready",
+      historySessions: [],
+      lastMutationAt: Date.now(),
+      layout: defaultOfficeLayout,
+      liveSessions: [
+        createSession("waiting-1", {
+          lastUserAnswer: "Minimal change",
+          lastUserQuestion: "Approach: Which implementation path should I use?",
+          state: "waiting_user",
+          title: "Waiting session",
+          updatedAt,
+        }),
+      ],
+      settings: DEFAULT_OFFICE_UI_SETTINGS,
+      sessionMeta: {
+        hasMoreHistory: false,
+        historyCap: 200,
+        liveCount: 1,
+        nextBefore: null,
+        offlineCount: 0,
+        trackedCount: 1,
+      },
+      sessions: [],
+    });
+
+    render(<App />);
+
+    expect(screen.getByText("Approach: Which implementation path should I use?")).toBeTruthy();
+    expect(screen.getByText("Response: Minimal change")).toBeTruthy();
+    expect(screen.getByText("Response recorded")).toBeTruthy();
+  });
+});
+
+describe("app drawer", () => {
+  it("shows a waiting narrative with compact summary data and collapsed diagnostics by default", async () => {
+    const user = userEvent.setup();
+    const updatedAt = new Date(Date.now() - 30_000).toISOString();
+    const waitingSession = createSession("waiting-1", {
+      activeSubtasks: 2,
+      cwd: "/tmp/monorepo",
+      gitBranch: "codex/fix-drawer",
+      lastUserQuestion: "Approach: Which implementation path should I use?",
+      state: "waiting_user",
+      title: "Waiting session",
+      tokensUsed: 1_250_000,
+      updatedAt,
+    });
+    const activity: SessionActivityItem[] = [
+      {
+        id: "waiting-1:tool_started:1",
+        label: "Started rg",
+        state: "using_tool",
+        timestamp: updatedAt,
+        tool: "rg",
+        type: "tool_started",
+      },
+    ];
+
+    useOfficeStore.setState({
+      account: null,
+      activityBySession: {
+        [waitingSession.sessionId]: activity,
+      },
+      connection: "ready",
+      historySessions: [],
+      lastMutationAt: Date.now(),
+      layout: defaultOfficeLayout,
+      liveSessions: [waitingSession],
+      settings: DEFAULT_OFFICE_UI_SETTINGS,
+      sessionMeta: {
+        hasMoreHistory: false,
+        historyCap: 200,
+        liveCount: 1,
+        nextBefore: null,
+        offlineCount: 0,
+        trackedCount: 1,
+      },
+      sessions: [],
+    });
+
+    render(<App />);
+
+    const liveSessionsSection = screen.getByText("Live sessions").closest("section");
+
+    if (!liveSessionsSection) {
+      throw new Error("Expected live sessions section");
+    }
+
+    await user.click(within(liveSessionsSection).getByRole("button", { name: /waiting session/i }));
+
+    expect(screen.getByText("Approach: Which implementation path should I use?")).toBeTruthy();
+    expect(screen.getByText("Repo")).toBeTruthy();
+    expect(screen.getByText("monorepo")).toBeTruthy();
+    expect(screen.getByText("Branch")).toBeTruthy();
+    expect(screen.getByText("codex/fix-drawer")).toBeTruthy();
+    expect(screen.getByText("Updated")).toBeTruthy();
+    expect(screen.getByText("Recent activity")).toBeTruthy();
+    expect(screen.getByText("Started rg")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /show diagnostics/i })).toBeTruthy();
+    expect(screen.queryByText("Tokens used")).toBeNull();
+    expect(screen.queryByText("Signal source")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /show diagnostics/i }));
+
+    expect(screen.getByText("Tokens used")).toBeTruthy();
+    expect(screen.getByText("Signal source")).toBeTruthy();
+    expect(screen.getByText("Recent tools")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /close selected session/i }));
+    expect(screen.getByText("Session overview")).toBeTruthy();
+  });
+
+  it("shows approval and error narratives for selected sessions", async () => {
+    const user = userEvent.setup();
+    const permissionSession = createSession("permission-1", {
+      cwd: "/tmp/api",
+      gitBranch: "codex/approval",
+      pendingApprovalJustification: "Do you want to allow the daemon to start?",
+      state: "permission_needed",
+      title: "Permission session",
+      updatedAt: new Date(Date.now() - 45_000).toISOString(),
+    });
+    const errorSession = createSession("error-1", {
+      cwd: "/tmp/frontend-app",
+      gitBranch: "codex/error-case",
+      state: "error",
+      title: "Error session",
+      updatedAt: new Date(Date.now() - 90_000).toISOString(),
+    });
+    const errorActivity: SessionActivityItem[] = [
+      {
+        id: "error-1:state_changed:1",
+        label: "Failed to resolve conflict in Header.tsx",
+        state: "error",
+        timestamp: errorSession.updatedAt,
+        tool: null,
+        type: "state_changed",
+      },
+    ];
+
+    useOfficeStore.setState({
+      account: null,
+      activityBySession: {
+        [errorSession.sessionId]: errorActivity,
+      },
+      connection: "ready",
+      historySessions: [],
+      lastMutationAt: Date.now(),
+      layout: defaultOfficeLayout,
+      liveSessions: [permissionSession, errorSession],
+      settings: DEFAULT_OFFICE_UI_SETTINGS,
+      sessionMeta: {
+        hasMoreHistory: false,
+        historyCap: 200,
+        liveCount: 2,
+        nextBefore: null,
+        offlineCount: 0,
+        trackedCount: 2,
+      },
+      sessions: [],
+    });
+
+    render(<App />);
+
+    const liveSessionsSection = screen.getByText("Live sessions").closest("section");
+
+    if (!liveSessionsSection) {
+      throw new Error("Expected live sessions section");
+    }
+
+    await user.click(
+      within(liveSessionsSection).getByRole("button", { name: /permission session/i }),
+    );
+    expect(screen.getByText("Do you want to allow the daemon to start?")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /close selected session/i }));
+
+    const refreshedLiveSessionsSection = screen.getByText("Live sessions").closest("section");
+
+    if (!refreshedLiveSessionsSection) {
+      throw new Error("Expected live sessions section");
+    }
+
+    await user.click(
+      within(refreshedLiveSessionsSection).getByRole("button", { name: /error session/i }),
+    );
+    expect(
+      screen.getByText("Failed to resolve conflict in Header.tsx", {
+        selector: ".drawer-narrative",
+      }),
+    ).toBeTruthy();
   });
 });

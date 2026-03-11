@@ -277,9 +277,9 @@ describe("app settings", () => {
     await user.click(screen.getByRole("switch", { name: /compact roster mode/i }));
     expect(container.firstElementChild?.getAttribute("data-compact-mode")).toBe("true");
 
-    expect(screen.getByText("Attention")).toBeTruthy();
+    expect(screen.getByText("Watch closely")).toBeTruthy();
     await user.click(screen.getByRole("switch", { name: /show attention inbox/i }));
-    expect(screen.queryByText("Attention")).toBeNull();
+    expect(screen.queryByText("Watch closely")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /close settings/i }));
     await user.hover(screen.getByTestId("office-canvas"));
@@ -319,7 +319,7 @@ describe("app settings", () => {
     });
   });
 
-  it("shows captured waiting questions and responses in the attention inbox", () => {
+  it("shows response-recorded sessions in the watch closely attention section", () => {
     const updatedAt = new Date(Date.now() - 30_000).toISOString();
 
     useOfficeStore.setState({
@@ -352,9 +352,113 @@ describe("app settings", () => {
 
     render(<App />);
 
+    expect(screen.queryByText("Needs action now")).toBeNull();
+    expect(screen.getByText("Watch closely")).toBeTruthy();
     expect(screen.getByText("Approach: Which implementation path should I use?")).toBeTruthy();
-    expect(screen.getByText("Response: Minimal change")).toBeTruthy();
     expect(screen.getByText("Response recorded")).toBeTruthy();
+    expect(screen.queryByText("Minimal change")).toBeNull();
+  });
+
+  it("renders attention sections in order before live sessions and opens the selected drawer", async () => {
+    const user = userEvent.setup();
+    const now = Date.now();
+    const permissionSession = createSession("permission-1", {
+      pendingApprovalJustification: "Do you want to allow the daemon to start?",
+      state: "permission_needed",
+      title: "Permission session",
+      updatedAt: new Date(now - 45_000).toISOString(),
+    });
+    const stuckSession = createSession("stuck-1", {
+      currentTool: "rg",
+      state: "using_tool",
+      title: "Stuck session",
+      updatedAt: new Date(now - 300_000).toISOString(),
+    });
+    const finishedSession = createSession("finished-1", {
+      lastTurnOutcome: "completed",
+      lastTurnOutcomeAt: new Date(now - 120_000).toISOString(),
+      state: "inactive",
+      title: "Finished session",
+      updatedAt: new Date(now - 120_000).toISOString(),
+    });
+
+    useOfficeStore.setState({
+      account: null,
+      activityBySession: {},
+      connection: "ready",
+      historySessions: [],
+      lastMutationAt: now,
+      layout: defaultOfficeLayout,
+      liveSessions: [permissionSession, stuckSession, finishedSession],
+      settings: DEFAULT_OFFICE_UI_SETTINGS,
+      sessionMeta: {
+        hasMoreHistory: false,
+        historyCap: 200,
+        liveCount: 3,
+        nextBefore: null,
+        offlineCount: 0,
+        trackedCount: 3,
+      },
+      sessions: [],
+    });
+
+    render(<App />);
+
+    const panelHeadings = screen
+      .getAllByRole("heading", { level: 3 })
+      .map((heading) => heading.textContent);
+
+    expect(panelHeadings.slice(0, 4)).toEqual([
+      "Needs action now",
+      "Watch closely",
+      "Recently finished",
+      "Live sessions",
+    ]);
+
+    const actionSection = screen.getByText("Needs action now").closest("section");
+
+    if (!actionSection) {
+      throw new Error("Expected attention action section");
+    }
+
+    await user.click(within(actionSection).getByRole("button", { name: /permission session/i }));
+    expect(screen.getByText("Do you want to allow the daemon to start?")).toBeTruthy();
+  });
+
+  it("shows an empty attention state above the live roster when nothing needs attention", () => {
+    const updatedAt = new Date(Date.now() - 30_000).toISOString();
+
+    useOfficeStore.setState({
+      account: null,
+      activityBySession: {},
+      connection: "ready",
+      historySessions: [],
+      lastMutationAt: Date.now(),
+      layout: defaultOfficeLayout,
+      liveSessions: [
+        createSession("thinking-1", {
+          state: "thinking",
+          title: "Thinking session",
+          updatedAt,
+        }),
+      ],
+      settings: DEFAULT_OFFICE_UI_SETTINGS,
+      sessionMeta: {
+        hasMoreHistory: false,
+        historyCap: 200,
+        liveCount: 1,
+        nextBefore: null,
+        offlineCount: 0,
+        trackedCount: 1,
+      },
+      sessions: [],
+    });
+
+    render(<App />);
+
+    expect(screen.getByText("Nothing needs attention right now.")).toBeTruthy();
+    expect(screen.getByText("Live sessions")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /thinking session/i })).toBeTruthy();
   });
 });
 

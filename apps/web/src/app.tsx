@@ -24,6 +24,7 @@ import {
 } from "./lib/format";
 import { type SessionActivityItem, useOfficeStore } from "./lib/office-store";
 import {
+  type AttentionItem,
   type SessionGeometry,
   buildLiveOfficeSessions,
   getAttentionItems,
@@ -53,6 +54,24 @@ const connectionLabels: Record<"connecting" | "ready" | "error", string> = {
   error: "Error",
   ready: "Ready",
 };
+
+const attentionSectionMeta = [
+  {
+    description: "Sessions blocked or waiting on you right now.",
+    key: "action_now" as const,
+    title: "Needs action now",
+  },
+  {
+    description: "Live work that may need intervention soon.",
+    key: "watch_closely" as const,
+    title: "Watch closely",
+  },
+  {
+    description: "Completed work from the last few minutes.",
+    key: "recently_finished" as const,
+    title: "Recently finished",
+  },
+];
 
 const recentOutcomeEventTypes = new Set(["turn_completed", "turn_cancelled", "turn_rolled_back"]);
 
@@ -439,8 +458,18 @@ export function App() {
   const hiddenLiveCount = Math.max(liveOfficeSessions.length - visibleLiveSessions.length, 0);
   const metrics = useMemo(() => getOfficeMetrics(liveSessions, now), [liveSessions, now]);
   const attentionItems = useMemo(
-    () => getAttentionItems(liveOfficeSessions, now),
-    [liveOfficeSessions, now],
+    () => getAttentionItems(liveOfficeSessions, activityBySession, now),
+    [activityBySession, liveOfficeSessions, now],
+  );
+  const attentionSections = useMemo(
+    () =>
+      attentionSectionMeta
+        .map((section) => ({
+          ...section,
+          items: attentionItems.filter((item) => item.section === section.key),
+        }))
+        .filter((section) => section.items.length > 0),
+    [attentionItems],
   );
   const linkedSessionId = selectedSessionId ?? hoveredSessionId;
   const selectedOfficeSession = liveOfficeSessions.find(
@@ -533,6 +562,39 @@ export function App() {
 
   const toggleSelection = (sessionId: string | null) => {
     setSelectedSessionId((current) => (current === sessionId ? null : sessionId));
+  };
+
+  const renderAttentionItem = (item: AttentionItem) => {
+    const sessionIdentity = getRosterIdentity(item.session.session, {
+      deskBadge: item.session.deskBadge,
+    });
+
+    return (
+      <button
+        className={`attention-item attention-item-${item.severity}`}
+        key={`${item.session.session.sessionId}:${item.kind}:${item.occurredAt}`}
+        onClick={() => toggleSelection(item.session.session.sessionId)}
+        type="button"
+      >
+        <div className="attention-item-head">
+          <div className="attention-item-identity">
+            <span className="attention-badge">{item.session.deskBadge}</span>
+            <strong>{sessionIdentity.primary}</strong>
+          </div>
+          <div className="attention-item-meta">
+            <span className="attention-state-pill">
+              {stateLabels[item.session.session.state]}
+            </span>
+            <span className="attention-item-time">{formatRelative(item.occurredAt)}</span>
+          </div>
+        </div>
+
+        <div className="attention-copy">
+          <p className="attention-headline">{item.headline}</p>
+          {item.detail ? <p className="attention-detail">{item.detail}</p> : null}
+        </div>
+      </button>
+    );
   };
 
   const handleSettingsChange = (patch: Partial<typeof settings>) => {
@@ -896,42 +958,26 @@ export function App() {
                 </div>
               </div>
 
-              {settings.showAttentionInbox && attentionItems.length > 0 ? (
-                <section className="panel-section">
-                  <div className="panel-subheader">
-                    <h3>Attention</h3>
-                    <p>Sessions that need action or are waiting on you.</p>
-                  </div>
+              {settings.showAttentionInbox ? (
+                attentionSections.length > 0 ? (
+                  attentionSections.map((section) => (
+                    <section className="panel-section" key={section.key}>
+                      <div className="panel-subheader">
+                        <h3>{section.title}</h3>
+                        <p>{section.description}</p>
+                      </div>
 
-                  <div className="attention-list">
-                    {attentionItems.map((item) => {
-                      const sessionIdentity = getRosterIdentity(item.session.session, {
-                        deskBadge: item.session.deskBadge,
-                      });
-
-                      return (
-                        <button
-                          className={`attention-item attention-item-${item.severity}`}
-                          key={`${item.session.session.sessionId}:${item.reason}`}
-                          onClick={() => toggleSelection(item.session.session.sessionId)}
-                          type="button"
-                        >
-                          <span className="attention-badge">{item.session.deskBadge}</span>
-                          <span className="attention-copy">
-                            <strong>{sessionIdentity.primary}</strong>
-                            <span>{item.reason}</span>
-                            {item.response ? (
-                              <span className="attention-response">Response: {item.response}</span>
-                            ) : null}
-                            {item.detail ? (
-                              <span className="attention-detail">{item.detail}</span>
-                            ) : null}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
+                      <div className="attention-list">{section.items.map(renderAttentionItem)}</div>
+                    </section>
+                  ))
+                ) : (
+                  <section className="panel-section">
+                    <div className="panel-subheader">
+                      <h3>Attention</h3>
+                      <p>Nothing needs attention right now.</p>
+                    </div>
+                  </section>
+                )
               ) : null}
 
               <section className="panel-section">

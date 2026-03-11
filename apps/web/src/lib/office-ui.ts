@@ -1,10 +1,12 @@
 import { agentPalette } from "@office-codex/assets";
 import type { AgentSession, DeskAnchor, OfficeLayout } from "@office-codex/core";
+import type { SessionActivityItem } from "./office-store";
 
 const OVERFLOW_PREFIX = "overflow:";
 
-export const BLOCKED_WAIT_MS = 180_000;
+export const BLOCKED_WAIT_MS = 240_000;
 export const HEATMAP_WINDOW_MS = 300_000;
+export const RECENTLY_FINISHED_MS = 180_000;
 
 export interface SessionRect {
   x: number;
@@ -35,11 +37,19 @@ export interface OfficeRenderSession {
 }
 
 export interface AttentionItem {
-  reason: string;
   detail?: string;
-  response?: string;
+  headline: string;
+  kind:
+    | "needs_answer"
+    | "needs_approval"
+    | "error"
+    | "stuck"
+    | "response_recorded"
+    | "finished";
+  occurredAt: string;
+  section: "action_now" | "watch_closely" | "recently_finished";
   session: OfficeRenderSession;
-  severity: "critical" | "warning";
+  severity: "critical" | "warning" | "info";
 }
 
 function clampChannel(value: number): number {
@@ -252,6 +262,84 @@ export function isBlockedSession(session: AgentSession, now: number): boolean {
   return Number.isFinite(updatedAt) && now - updatedAt >= BLOCKED_WAIT_MS;
 }
 
+function isStuckSession(session: AgentSession, now: number): boolean {
+  if (!["thinking", "using_tool", "responding"].includes(session.state)) {
+    return false;
+  }
+
+  const updatedAt = Date.parse(session.updatedAt);
+  return Number.isFinite(updatedAt) && now - updatedAt >= BLOCKED_WAIT_MS;
+}
+
+function isRecentlyFinishedSession(session: AgentSession, now: number): boolean {
+  if (session.state !== "inactive" || session.lastTurnOutcome !== "completed" || !session.lastTurnOutcomeAt) {
+    return false;
+  }
+
+  const completedAt = Date.parse(session.lastTurnOutcomeAt);
+  return Number.isFinite(completedAt) && now - completedAt <= RECENTLY_FINISHED_MS;
+}
+
+function isGenericStateActivityLabel(label: string): boolean {
+  return label.startsWith("Current state:") || label.startsWith("State ->");
+}
+
+function getLatestRelevantErrorDetail(activity: SessionActivityItem[]): string | null {
+  const directError = activity.find(
+    (item) => item.state === "error" && !isGenericStateActivityLabel(item.label),
+  );
+
+  if (directError) {
+    return directError.label;
+  }
+
+  const fallbackError = activity.find((item) => item.state === "error");
+  return fallbackError ? fallbackError.label : null;
+}
+
+function getStuckDetail(session: AgentSession): string {
+  if (session.currentTool) {
+    return `Using ${session.currentTool}`;
+  }
+
+  switch (session.state) {
+    case "responding":
+      return "Responding";
+    case "thinking":
+      return "Thinking";
+    case "using_tool":
+      return "Using tool";
+    default:
+      return "Working";
+  }
+}
+
+function getMinutesAgo(timestamp: string, now: number): number | null {
+  const parsed = Date.parse(timestamp);
+
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.max(1, Math.floor((now - parsed) / 60_000));
+}
+
+function getFinishedDetail(timestamp: string, now: number): string {
+  const minutesAgo = getMinutesAgo(timestamp, now);
+  return `Finished ${minutesAgo ?? 1}m ago`;
+}
+
+function getAttentionSortRank(item: AttentionItem): number {
+  switch (item.section) {
+    case "action_now":
+      return item.severity === "critical" ? 0 : 1;
+    case "watch_closely":
+      return item.severity === "warning" ? 2 : 3;
+    case "recently_finished":
+      return 4;
+  }
+}
+
 export function getHeatmapIntensity(session: AgentSession, now: number): number {
   const updatedAt = Date.parse(session.updatedAt);
 
@@ -319,61 +407,101 @@ export function getOfficeMetrics(sessions: AgentSession[], now: number) {
 
 export function getAttentionItems(
   sessions: OfficeRenderSession[],
+  activityBySession: Record<string, SessionActivityItem[]>,
   now: number,
-  limit = 4,
 ): AttentionItem[] {
   const items: AttentionItem[] = [];
 
   for (const renderSession of sessions) {
-    if (renderSession.session.state === "error") {
+    const { session } = renderSession;
+    const activity = activityBySession[session.sessionId] ?? [];
+
+    if (session.state === "error") {
       items.push({
-        reason: "Agent error",
+        detail: getLatestRelevantErrorDetail(activity) ?? "Agent error",
+        headline: "Needs attention",
+        kind: "error",
+        occurredAt: session.updatedAt,
+        section: "action_now",
         session: renderSession,
         severity: "critical",
       });
       continue;
     }
 
-    if (renderSession.session.state === "permission_needed") {
+    if (session.state === "permission_needed") {
       items.push({
-        reason: renderSession.session.pendingApprovalJustification ?? "Permission needed",
+        detail: session.pendingApprovalJustification ?? "Needs your approval",
+        headline: "Needs approval",
+        kind: "needs_approval",
+        occurredAt: session.updatedAt,
+        section: "action_now",
         session: renderSession,
         severity: "critical",
       });
       continue;
     }
 
-    if (renderSession.session.state === "waiting_user") {
-      const blockedMinutes = Math.floor(
-        (now - Date.parse(renderSession.session.updatedAt)) / 60000,
-      );
-      const question = renderSession.session.lastUserQuestion;
-      const response = renderSession.session.lastUserAnswer;
-      const detail = renderSession.isBlocked
-        ? response
-          ? `Waiting ${blockedMinutes}m after reply`
-          : `Waiting ${blockedMinutes}m`
-        : response
-          ? "Response recorded"
-          : "Awaiting response";
-
+    if (session.state === "waiting_user" && !session.lastUserAnswer) {
       items.push({
-        ...(question ? { detail } : {}),
-        ...(response ? { response } : {}),
-        reason: question ?? detail,
+        detail: session.lastUserQuestion ?? "Waiting for your response",
+        headline: "Needs answer",
+        kind: "needs_answer",
+        occurredAt: session.updatedAt,
+        section: "action_now",
+        session: renderSession,
+        severity: renderSession.isBlocked ? "critical" : "warning",
+      });
+      continue;
+    }
+
+    if (isStuckSession(session, now)) {
+      items.push({
+        detail: getStuckDetail(session),
+        headline: "No progress in 4m",
+        kind: "stuck",
+        occurredAt: session.updatedAt,
+        section: "watch_closely",
         session: renderSession,
         severity: "warning",
+      });
+      continue;
+    }
+
+    if (session.state === "waiting_user" && session.lastUserAnswer) {
+      items.push({
+        detail: session.lastUserQuestion ?? "Waiting to resume",
+        headline: "Response recorded",
+        kind: "response_recorded",
+        occurredAt: session.updatedAt,
+        section: "watch_closely",
+        session: renderSession,
+        severity: "info",
+      });
+      continue;
+    }
+
+    if (isRecentlyFinishedSession(session, now)) {
+      items.push({
+        detail: getFinishedDetail(session.lastTurnOutcomeAt ?? session.updatedAt, now),
+        headline: "Finished",
+        kind: "finished",
+        occurredAt: session.lastTurnOutcomeAt ?? session.updatedAt,
+        section: "recently_finished",
+        session: renderSession,
+        severity: "info",
       });
     }
   }
 
   return items
     .sort((left, right) => {
-      if (left.severity !== right.severity) {
-        return left.severity === "critical" ? -1 : 1;
+      const rankDifference = getAttentionSortRank(left) - getAttentionSortRank(right);
+
+      if (rankDifference !== 0) {
+        return rankDifference;
       }
 
-      return right.session.session.updatedAt.localeCompare(left.session.session.updatedAt);
-    })
-    .slice(0, limit);
+      return right.occurredAt.localeCompare(left.occurredAt);
+    });
 }

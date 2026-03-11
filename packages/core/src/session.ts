@@ -159,6 +159,7 @@ export function createAgentSession(seed: AgentSessionSeed): AgentSession {
     pendingApprovalJustification: seed.pendingApprovalJustification ?? null,
     lastUserQuestion: seed.lastUserQuestion ?? null,
     lastUserAnswer: seed.lastUserAnswer ?? null,
+    lastUserOptions: seed.lastUserOptions ?? [],
     offlineReason: seed.offlineReason ?? null,
     lastEventAt: updatedAt,
     lastEventType: null,

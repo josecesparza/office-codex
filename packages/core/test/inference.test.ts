@@ -58,6 +58,18 @@ describe("reduceTranscriptEntries", () => {
       "Approach: Which implementation path should I use?",
     );
     expect(result.session.lastUserAnswer).toBe("Minimal change");
+    expect(result.session.lastUserOptions).toEqual([
+      {
+        description: "Patch only the affected drawer flow.",
+        id: "minimal_change",
+        label: "Minimal change",
+      },
+      {
+        description: "Restructure the selected-session drawer before iterating.",
+        id: "full_refactor",
+        label: "Full refactor",
+      },
+    ]);
 
     const stateChanges = result.emitted.filter((event) => event.type === "state_changed");
     expect(stateChanges.at(-1)?.state).toBe("waiting_user");
@@ -84,6 +96,7 @@ describe("reduceTranscriptEntries", () => {
 
     expect(result.session.state).toBe("waiting_user");
     expect(result.session.activeSubtasks).toBe(0);
+    expect(result.session.lastUserOptions).toEqual([]);
   });
 
   it("formats multiple captured answers into a readable summary", () => {

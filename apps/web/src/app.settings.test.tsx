@@ -359,7 +359,7 @@ describe("app settings", () => {
 });
 
 describe("app drawer", () => {
-  it("shows a waiting narrative with compact summary data and collapsed diagnostics by default", async () => {
+  it("shows a waiting card with collapsible proposed answers for selected sessions", async () => {
     const user = userEvent.setup();
     const updatedAt = new Date(Date.now() - 30_000).toISOString();
     const waitingSession = createSession("waiting-1", {
@@ -367,6 +367,18 @@ describe("app drawer", () => {
       cwd: "/tmp/monorepo",
       gitBranch: "codex/fix-drawer",
       lastUserQuestion: "Approach: Which implementation path should I use?",
+      lastUserOptions: [
+        {
+          description: "Patch only the affected drawer flow.",
+          id: "minimal_change",
+          label: "Minimal change",
+        },
+        {
+          description: "Restructure the selected-session drawer before iterating.",
+          id: "full_refactor",
+          label: "Full refactor",
+        },
+      ],
       state: "waiting_user",
       title: "Waiting session",
       tokensUsed: 1_250_000,
@@ -415,14 +427,179 @@ describe("app drawer", () => {
 
     await user.click(within(liveSessionsSection).getByRole("button", { name: /waiting session/i }));
 
+    expect(screen.getByText("Codex question")).toBeTruthy();
     expect(screen.getByText("Approach: Which implementation path should I use?")).toBeTruthy();
+    expect(screen.getByText("Suggested responses")).toBeTruthy();
+    expect(screen.getByText("Minimal change")).toBeTruthy();
+    expect(screen.getByText("Full refactor")).toBeTruthy();
+    expect(screen.getByText("You can answer differently in freeform.")).toBeTruthy();
+    expect(screen.queryByText("Repo")).toBeNull();
+    expect(screen.getByText("Recent activity")).toBeTruthy();
+    expect(screen.getByText("Started rg")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /hide proposed answers/i })).toBeTruthy();
+    expect(screen.queryByText("Tokens used")).toBeNull();
+    expect(screen.queryByText("Signal source")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /hide proposed answers/i }));
+
+    expect(screen.getByText("Approach: Which implementation path should I use?")).toBeTruthy();
+    expect(screen.queryByText("Minimal change")).toBeNull();
+    expect(screen.queryByText("Full refactor")).toBeNull();
+    expect(screen.queryByText("You can answer differently in freeform.")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /show proposed answers/i }));
+
+    expect(screen.getByText("Minimal change")).toBeTruthy();
+    expect(screen.getByText("Full refactor")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /close selected session/i }));
+    expect(screen.getByText("Session overview")).toBeTruthy();
+  });
+
+  it("shows waiting answer descriptions in tooltips and falls back to a question-only card", async () => {
+    const user = userEvent.setup();
+    const updatedAt = new Date(Date.now() - 30_000).toISOString();
+    const waitingWithOptions = createSession("waiting-1", {
+      lastUserQuestion: "Approach: Which implementation path should I use?",
+      lastUserOptions: [
+        {
+          description: "Patch only the affected drawer flow.",
+          id: "minimal_change",
+          label: "Minimal change",
+        },
+      ],
+      state: "waiting_user",
+      title: "Waiting with options",
+      updatedAt,
+    });
+    const waitingWithoutOptions = createSession("waiting-2", {
+      lastUserQuestion: "Which repo scope should I use?",
+      lastUserOptions: [],
+      state: "waiting_user",
+      title: "Waiting without options",
+      updatedAt,
+    });
+
+    useOfficeStore.setState({
+      account: null,
+      activityBySession: {},
+      connection: "ready",
+      historySessions: [],
+      lastMutationAt: Date.now(),
+      layout: defaultOfficeLayout,
+      liveSessions: [waitingWithOptions, waitingWithoutOptions],
+      settings: DEFAULT_OFFICE_UI_SETTINGS,
+      sessionMeta: {
+        hasMoreHistory: false,
+        historyCap: 200,
+        liveCount: 2,
+        nextBefore: null,
+        offlineCount: 0,
+        trackedCount: 2,
+      },
+      sessions: [],
+    });
+
+    render(<App />);
+
+    const liveSessionsSection = screen.getByText("Live sessions").closest("section");
+
+    if (!liveSessionsSection) {
+      throw new Error("Expected live sessions section");
+    }
+
+    await user.click(
+      within(liveSessionsSection).getByRole("button", { name: /waiting with options/i }),
+    );
+
+    const detailsButton = screen.getByRole("button", { name: /details for minimal change/i });
+    await user.hover(detailsButton);
+    expect((await screen.findByRole("tooltip")).textContent).toContain(
+      "Patch only the affected drawer flow.",
+    );
+    await user.unhover(detailsButton);
+
+    await user.click(screen.getByRole("button", { name: /close selected session/i }));
+
+    const refreshedLiveSessionsSection = screen.getByText("Live sessions").closest("section");
+
+    if (!refreshedLiveSessionsSection) {
+      throw new Error("Expected live sessions section");
+    }
+
+    await user.click(
+      within(refreshedLiveSessionsSection).getByRole("button", {
+        name: /waiting without options/i,
+      }),
+    );
+
+    expect(screen.getByText("Which repo scope should I use?")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /show proposed answers/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /hide proposed answers/i })).toBeNull();
+    expect(screen.queryByText("Suggested responses")).toBeNull();
+  });
+
+  it("keeps compact summary data and collapsed diagnostics for non-waiting sessions", async () => {
+    const user = userEvent.setup();
+    const updatedAt = new Date(Date.now() - 30_000).toISOString();
+    const liveSession = createSession("thinking-1", {
+      activeSubtasks: 2,
+      cwd: "/tmp/monorepo",
+      gitBranch: "codex/fix-drawer",
+      state: "thinking",
+      title: "Thinking session",
+      tokensUsed: 1_250_000,
+      updatedAt,
+    });
+    const activity: SessionActivityItem[] = [
+      {
+        id: "thinking-1:tool_started:1",
+        label: "Started rg",
+        state: "using_tool",
+        timestamp: updatedAt,
+        tool: "rg",
+        type: "tool_started",
+      },
+    ];
+
+    useOfficeStore.setState({
+      account: null,
+      activityBySession: {
+        [liveSession.sessionId]: activity,
+      },
+      connection: "ready",
+      historySessions: [],
+      lastMutationAt: Date.now(),
+      layout: defaultOfficeLayout,
+      liveSessions: [liveSession],
+      settings: DEFAULT_OFFICE_UI_SETTINGS,
+      sessionMeta: {
+        hasMoreHistory: false,
+        historyCap: 200,
+        liveCount: 1,
+        nextBefore: null,
+        offlineCount: 0,
+        trackedCount: 1,
+      },
+      sessions: [],
+    });
+
+    render(<App />);
+
+    const liveSessionsSection = screen.getByText("Live sessions").closest("section");
+
+    if (!liveSessionsSection) {
+      throw new Error("Expected live sessions section");
+    }
+
+    await user.click(within(liveSessionsSection).getByRole("button", { name: /thinking session/i }));
+
+    expect(screen.getByText("Working now", { selector: ".drawer-narrative" })).toBeTruthy();
     expect(screen.getByText("Repo")).toBeTruthy();
     expect(screen.getByText("monorepo")).toBeTruthy();
     expect(screen.getByText("Branch")).toBeTruthy();
     expect(screen.getByText("codex/fix-drawer")).toBeTruthy();
     expect(screen.getByText("Updated")).toBeTruthy();
-    expect(screen.getByText("Recent activity")).toBeTruthy();
-    expect(screen.getByText("Started rg")).toBeTruthy();
     expect(screen.getByRole("button", { name: /show diagnostics/i })).toBeTruthy();
     expect(screen.queryByText("Tokens used")).toBeNull();
     expect(screen.queryByText("Signal source")).toBeNull();
@@ -432,9 +609,6 @@ describe("app drawer", () => {
     expect(screen.getByText("Tokens used")).toBeTruthy();
     expect(screen.getByText("Signal source")).toBeTruthy();
     expect(screen.getByText("Recent tools")).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: /close selected session/i }));
-    expect(screen.getByText("Session overview")).toBeTruthy();
   });
 
   it("shows approval and error narratives for selected sessions", async () => {

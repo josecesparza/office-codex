@@ -33,6 +33,7 @@ export interface SessionSeedPatch {
   pendingApprovalJustification?: string | null;
   lastUserQuestion?: string | null;
   lastUserAnswer?: string | null;
+  lastUserOptions?: AgentSession["lastUserOptions"];
   offlineReason?: AgentSession["offlineReason"];
 }
 
@@ -121,6 +122,7 @@ function mergeSessionSeed(session: AgentSession, seed: SessionSeedPatch): AgentS
       seed.pendingApprovalJustification ?? session.pendingApprovalJustification,
     lastUserQuestion: seed.lastUserQuestion ?? session.lastUserQuestion,
     lastUserAnswer: seed.lastUserAnswer ?? session.lastUserAnswer,
+    lastUserOptions: seed.lastUserOptions ?? session.lastUserOptions,
     offlineReason: seed.offlineReason ?? session.offlineReason,
   };
 }
@@ -228,6 +230,10 @@ export class SessionStore {
 
       if (seed.lastUserAnswer !== undefined) {
         createSeed.lastUserAnswer = seed.lastUserAnswer;
+      }
+
+      if (seed.lastUserOptions !== undefined) {
+        createSeed.lastUserOptions = seed.lastUserOptions;
       }
 
       if (seed.offlineReason !== undefined) {

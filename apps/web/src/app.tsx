@@ -8,6 +8,12 @@ import { OfficeSettingsSheet } from "./components/office-settings-sheet";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card } from "./components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./components/ui/tooltip";
 import { formatAccountUsageSummary, shouldShowUnavailableUsage } from "./lib/account-usage";
 import {
   basename,
@@ -193,6 +199,15 @@ interface DrawerField {
   value: string;
 }
 
+interface WaitingDrawerCardData {
+  options: Array<{
+    description: string;
+    id: string;
+    label: string;
+  }>;
+  question: string;
+}
+
 function isGenericStateActivityLabel(label: string): boolean {
   return label.startsWith("Current state:") || label.startsWith("State ->");
 }
@@ -279,6 +294,7 @@ export function App() {
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [drawerDiagnosticsOpen, setDrawerDiagnosticsOpen] = useState(false);
+  const [waitingCardExpanded, setWaitingCardExpanded] = useState(true);
   const [deskAssignments, setDeskAssignments] = useState<Record<string, string>>({});
   const [now, setNow] = useState(() => Date.now());
   const [sessionGeometries, setSessionGeometries] = useState<Record<string, SessionGeometry>>({});
@@ -333,6 +349,7 @@ export function App() {
 
   useEffect(() => {
     setDrawerDiagnosticsOpen(false);
+    setWaitingCardExpanded(true);
   }, [selectedSessionId]);
 
   useEffect(() => {
@@ -457,6 +474,22 @@ export function App() {
   const selectedReliabilityIndicator = selectedOfficeSession
     ? getReliabilityIndicator(selectedOfficeSession.session)
     : null;
+  const selectedWaitingCard = useMemo<WaitingDrawerCardData | null>(() => {
+    if (!selectedOfficeSession) {
+      return null;
+    }
+
+    const { session } = selectedOfficeSession;
+
+    if (session.state !== "waiting_user" || !session.lastUserQuestion) {
+      return null;
+    }
+
+    return {
+      options: session.lastUserOptions,
+      question: session.lastUserQuestion,
+    };
+  }, [selectedOfficeSession]);
   const selectedDrawerSummary = useMemo(() => {
     if (!selectedOfficeSession) {
       return null;
@@ -686,17 +719,100 @@ export function App() {
                 </button>
               </div>
 
-              <div className="drawer-section">
-                <p className="drawer-narrative">{selectedDrawerSummary?.narrative}</p>
-                <dl className="drawer-grid drawer-grid-summary">
-                  {selectedDrawerSummary?.summaryFields.map((field) => (
-                    <div key={field.label}>
-                      <dt>{field.label}</dt>
-                      <dd>{field.value}</dd>
+              {selectedWaitingCard ? (
+                <div className="drawer-section waiting-card">
+                  <div className="waiting-card-head">
+                    <Badge className="badge badge-waiting_user" variant="outline">
+                      {stateLabels[selectedOfficeSession.session.state]}
+                    </Badge>
+
+                    {selectedWaitingCard.options.length > 0 ? (
+                      <button
+                        aria-controls="drawer-waiting-options"
+                        aria-expanded={waitingCardExpanded}
+                        className="drawer-section-toggle"
+                        onClick={() => setWaitingCardExpanded((current) => !current)}
+                        type="button"
+                      >
+                        {waitingCardExpanded ? "Hide proposed answers" : "Show proposed answers"}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="waiting-card-body">
+                    <p className="waiting-card-label">Codex question</p>
+                    <p className="waiting-card-question">{selectedWaitingCard.question}</p>
+                  </div>
+
+                  {selectedWaitingCard.options.length > 0 && waitingCardExpanded ? (
+                    <div className="waiting-card-options" id="drawer-waiting-options">
+                      <p className="waiting-card-label">Suggested responses</p>
+                      <TooltipProvider delayDuration={0}>
+                        <ul className="waiting-option-list">
+                          {selectedWaitingCard.options.map((option) => (
+                            <li className="waiting-option-item" key={option.id}>
+                              <div className="waiting-option-card">
+                                <span className="waiting-option-label">{option.label}</span>
+                                {option.description ? (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <button
+                                        aria-label={`Details for ${option.label}`}
+                                        className="waiting-option-info"
+                                        type="button"
+                                      >
+                                        <svg
+                                          aria-hidden="true"
+                                          height="14"
+                                          viewBox="0 0 20 20"
+                                          width="14"
+                                        >
+                                          <circle
+                                            cx="10"
+                                            cy="10"
+                                            fill="none"
+                                            r="7"
+                                            stroke="currentColor"
+                                            strokeWidth="1.4"
+                                          />
+                                          <path
+                                            d="M10 8.3V13"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeLinecap="round"
+                                            strokeWidth="1.4"
+                                          />
+                                          <circle cx="10" cy="6.3" fill="currentColor" r="0.9" />
+                                        </svg>
+                                      </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>{option.description}</TooltipContent>
+                                  </Tooltip>
+                                ) : null}
+                              </div>
+                            </li>
+                          ))}
+                          <li className="waiting-option-note">
+                            You can answer differently in freeform.
+                          </li>
+                        </ul>
+                      </TooltipProvider>
                     </div>
-                  ))}
-                </dl>
-              </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="drawer-section">
+                  <p className="drawer-narrative">{selectedDrawerSummary?.narrative}</p>
+                  <dl className="drawer-grid drawer-grid-summary">
+                    {selectedDrawerSummary?.summaryFields.map((field) => (
+                      <div key={field.label}>
+                        <dt>{field.label}</dt>
+                        <dd>{field.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              )}
 
               <div className="drawer-section">
                 <div className="drawer-section-head">

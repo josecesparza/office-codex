@@ -47,6 +47,12 @@ export const WRAPPER_EVENT_TYPES = ["launch", "identified", "exit"] as const;
 
 export type WrapperEventType = (typeof WRAPPER_EVENT_TYPES)[number];
 
+export interface UserInputOption {
+  description: string;
+  id: string;
+  label: string;
+}
+
 export interface AgentSession {
   sessionId: string;
   source: string;
@@ -70,6 +76,7 @@ export interface AgentSession {
   pendingApprovalJustification: string | null;
   lastUserQuestion: string | null;
   lastUserAnswer: string | null;
+  lastUserOptions: UserInputOption[];
   offlineReason: OfflineReason | null;
   lastEventAt: string;
   lastEventType: AgentEventType | null;
@@ -95,6 +102,7 @@ export interface AgentSessionSeed {
   pendingApprovalJustification?: string | null;
   lastUserQuestion?: string | null;
   lastUserAnswer?: string | null;
+  lastUserOptions?: UserInputOption[];
   offlineReason?: OfflineReason | null;
 }
 

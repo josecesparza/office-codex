@@ -1,5 +1,11 @@
 import { createAgentSession } from "./session.js";
-import type { AgentEvent, AgentSession, AgentSessionSeed, ParsedTranscriptEntry } from "./types.js";
+import type {
+  AgentEvent,
+  AgentSession,
+  AgentSessionSeed,
+  ParsedTranscriptEntry,
+  UserInputOption,
+} from "./types.js";
 
 export interface ApplyTranscriptEntryResult {
   session: AgentSession;
@@ -158,6 +164,44 @@ function extractLastUserQuestion(argumentsJson: Record<string, unknown> | null):
   );
 }
 
+function extractLastUserOptions(argumentsJson: Record<string, unknown> | null): UserInputOption[] {
+  const questions = argumentsJson?.questions;
+
+  if (!Array.isArray(questions)) {
+    return [];
+  }
+
+  return questions.flatMap((question, questionIndex) => {
+    if (!isRecord(question) || !Array.isArray(question.options)) {
+      return [];
+    }
+
+    const questionId =
+      typeof question.id === "string" && question.id.trim().length > 0
+        ? question.id.trim()
+        : `question_${questionIndex + 1}`;
+
+    return question.options.flatMap((option, optionIndex) => {
+      if (!isRecord(option)) {
+        return [];
+      }
+
+      const description =
+        typeof option.description === "string" ? option.description.trim() : "";
+      const label =
+        typeof option.label === "string" && option.label.trim().length > 0
+          ? option.label.trim()
+          : description || `Option ${optionIndex + 1}`;
+      const id =
+        typeof option.id === "string" && option.id.trim().length > 0
+          ? option.id.trim()
+          : `${questionId}:${optionIndex + 1}`;
+
+      return [{ description, id, label }];
+    });
+  });
+}
+
 function extractLastUserAnswer(output: string): string | null {
   try {
     const parsed = JSON.parse(output) as unknown;
@@ -240,6 +284,7 @@ export function applyTranscriptEntry(
       nextSession.pendingApprovalJustification = null;
       nextSession.lastUserQuestion = null;
       nextSession.lastUserAnswer = null;
+      nextSession.lastUserOptions = [];
       nextSession.stateSource = "transcript";
       transitionState(nextSession, "thinking", entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
@@ -257,6 +302,7 @@ export function applyTranscriptEntry(
       if (entry.name === "request_user_input") {
         nextSession.lastUserQuestion = extractLastUserQuestion(entry.argumentsJson);
         nextSession.lastUserAnswer = null;
+        nextSession.lastUserOptions = extractLastUserOptions(entry.argumentsJson);
       }
       emitted.push(createEvent(nextSession, "tool_started", entry.timestamp, entry.name));
 
@@ -306,6 +352,7 @@ export function applyTranscriptEntry(
       nextSession.pendingApprovalJustification = null;
       nextSession.lastUserQuestion = null;
       nextSession.lastUserAnswer = null;
+      nextSession.lastUserOptions = [];
       nextSession.stateSource = "transcript";
       transitionState(nextSession, "thinking", entry.timestamp, emitted);
       return finalizeUpdate(nextSession, entry.timestamp, emitted);
